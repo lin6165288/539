@@ -10,26 +10,30 @@ st.set_page_config(
     layout="wide"
 )
 
-# ===== 手機版樣式 =====
+# ===== 緊湊版樣式 =====
 st.markdown(
     """
     <style>
     .block-container {
-        padding-top: 0.4rem;
-        padding-left: 0.55rem;
-        padding-right: 0.55rem;
-        max-width: 760px;
+        padding-top: 0.25rem;
+        padding-left: 0.45rem;
+        padding-right: 0.45rem;
+        max-width: 720px;
     }
 
     h1 {
-        font-size: 1.3rem !important;
-        margin-bottom: 0.2rem !important;
+        font-size: 1.2rem !important;
+        margin-bottom: 0.1rem !important;
     }
 
     h2, h3 {
-        font-size: 1.02rem !important;
-        margin-top: 0.45rem !important;
-        margin-bottom: 0.35rem !important;
+        font-size: 0.98rem !important;
+        margin-top: 0.35rem !important;
+        margin-bottom: 0.2rem !important;
+    }
+
+    p {
+        margin-bottom: 0.25rem !important;
     }
 
     .stButton > button {
@@ -38,58 +42,59 @@ st.markdown(
         font-weight: 600;
     }
 
-    .number-btn button {
-        height: 2.5rem !important;
-        min-height: 2.5rem !important;
-        font-size: 0.95rem !important;
+    .num-btn button {
+        height: 2.15rem !important;
+        min-height: 2.15rem !important;
+        font-size: 0.88rem !important;
         padding: 0 !important;
         border-radius: 10px !important;
     }
 
     .main-btn button {
-        height: 2.9rem !important;
-        font-size: 1rem !important;
+        height: 2.6rem !important;
+        font-size: 0.95rem !important;
         border-radius: 12px !important;
     }
 
     .small-btn button {
-        height: 2.2rem !important;
-        font-size: 0.88rem !important;
+        height: 2.05rem !important;
+        font-size: 0.8rem !important;
         padding: 0 !important;
     }
 
     .stNumberInput input {
-        font-size: 1rem;
-        height: 2.5rem;
+        font-size: 0.95rem;
+        height: 2.35rem;
     }
 
     textarea {
-        font-size: 0.92rem !important;
-        line-height: 1.45 !important;
+        font-size: 0.88rem !important;
+        line-height: 1.35 !important;
     }
 
     div[data-testid="stMetric"] {
         background-color: #fff7ed;
-        padding: 10px;
-        border-radius: 14px;
+        padding: 8px;
+        border-radius: 12px;
         border: 1px solid #fed7aa;
     }
 
     div[data-testid="stMetricLabel"] {
-        font-size: 0.82rem;
+        font-size: 0.78rem;
     }
 
     div[data-testid="stMetricValue"] {
-        font-size: 1.08rem;
+        font-size: 1rem;
     }
 
     .selected-box {
         background: #f8fafc;
         border: 1px solid #cbd5e1;
         border-radius: 10px;
-        padding: 8px;
-        margin-bottom: 6px;
-        font-size: 0.9rem;
+        padding: 7px;
+        margin-bottom: 5px;
+        font-size: 0.84rem;
+        min-height: 48px;
     }
 
     .sticky-photo {
@@ -97,7 +102,7 @@ st.markdown(
         top: 0;
         z-index: 999;
         background: white;
-        padding: 5px 0 7px 0;
+        padding: 4px 0 6px 0;
         border-bottom: 2px solid #f97316;
     }
 
@@ -109,14 +114,14 @@ st.markdown(
         background: #fafafa;
     }
 
+    .compact-gap {
+        margin-top: -0.2rem;
+    }
+
     @media (max-width: 480px) {
         .block-container {
-            padding-left: 0.45rem;
-            padding-right: 0.45rem;
-        }
-
-        h1 {
-            font-size: 1.22rem !important;
+            padding-left: 0.38rem;
+            padding-right: 0.38rem;
         }
     }
     </style>
@@ -125,7 +130,7 @@ st.markdown(
 )
 
 st.title("🎯 539 快速計算器")
-st.caption("上傳照片當參考，用按鈕快速選號，系統自動計算。")
+st.caption("照片參考＋快速選號＋自動計算")
 
 
 # ===== 工具函式 =====
@@ -137,7 +142,7 @@ def combination(n, r):
 
 
 def format_num(value):
-    if abs(value - round(value)) < 0.0000001:
+    if abs(value - round(value)) < 1e-7:
         return str(int(round(value)))
     return f"{value:.2f}"
 
@@ -150,7 +155,6 @@ def parse_numbers(text):
 
     for item in number_matches:
         num = int(item)
-
         if 1 <= num <= 39:
             numbers.append(num)
         else:
@@ -180,11 +184,7 @@ def group_display(groups):
     if not groups:
         return ""
 
-    display_parts = []
-    for group in groups:
-        display_parts.append("、".join(f"{num:02d}" for num in group))
-
-    return " × ".join(display_parts)
+    return " × ".join("、".join(f"{num:02d}" for num in group) for group in groups)
 
 
 def selected_to_text(nums):
@@ -285,7 +285,6 @@ def calculate_results(lines, price_2, price_3, price_4):
         numbers = parsed["numbers"]
         groups = parsed["groups"]
         mode = parsed["mode"]
-
         n = len(numbers)
 
         if mode == "分區交叉":
@@ -364,17 +363,17 @@ def add_or_remove_number(group_key, num):
 def render_number_pad(group_key):
     numbers = list(range(1, 40))
 
-    for row_start in range(0, 39, 4):
-        row_nums = numbers[row_start:row_start + 4]
-        cols = st.columns(4)
+    for row_start in range(0, 39, 5):
+        row_nums = numbers[row_start:row_start + 5]
+        cols = st.columns(5, gap="small")
 
         for i, num in enumerate(row_nums):
             selected = num in st.session_state[group_key]
-            label = f"✅{num:02d}" if selected else f"{num:02d}"
+            label = f"✓{num:02d}" if selected else f"{num:02d}"
 
             with cols[i]:
-                st.markdown('<div class="number-btn">', unsafe_allow_html=True)
-                if st.button(label, key=f"{group_key}_{num}"):
+                st.markdown('<div class="num-btn">', unsafe_allow_html=True)
+                if st.button(label, key=f"{group_key}_{num}", use_container_width=True):
                     add_or_remove_number(group_key, num)
                     st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -396,115 +395,133 @@ for key in ["A區", "B區", "C區", "D區"]:
         st.session_state[key] = []
 
 
-# ===== 照片固定區 =====
+# ===== 照片區 =====
 
-st.subheader("📷 照片參考")
-
-uploaded_file = st.file_uploader(
-    "上傳彩券照片",
-    type=["jpg", "jpeg", "png"]
-)
-
-photo_height = st.radio(
-    "照片大小",
-    ["小", "中", "大"],
-    horizontal=True,
-    index=1
-)
-
-height_map = {
-    "小": "130px",
-    "中": "200px",
-    "大": "300px"
-}
-
-if uploaded_file is not None:
-    image_bytes = uploaded_file.getvalue()
-    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
-    mime_type = uploaded_file.type
-
-    st.markdown(
-        f"""
-        <div class="sticky-photo">
-            <img style="max-height: {height_map[photo_height]};" src="data:{mime_type};base64,{image_base64}">
-        </div>
-        """,
-        unsafe_allow_html=True
+with st.expander("📷 照片參考", expanded=False):
+    uploaded_file = st.file_uploader(
+        "上傳彩券照片",
+        type=["jpg", "jpeg", "png"],
+        label_visibility="collapsed"
     )
-else:
-    st.info("請先上傳照片，照片會固定在畫面上方方便對照。")
+
+    if uploaded_file is not None:
+        photo_size = st.radio(
+            "照片大小",
+            ["小", "中", "大"],
+            horizontal=True,
+            index=0,
+            label_visibility="collapsed"
+        )
+
+        height_map = {
+            "小": "120px",
+            "中": "180px",
+            "大": "260px"
+        }
+
+        image_bytes = uploaded_file.getvalue()
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        mime_type = uploaded_file.type
+
+        st.markdown(
+            f"""
+            <div class="sticky-photo">
+                <img style="max-height: {height_map[photo_size]};" src="data:{mime_type};base64,{image_base64}">
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 
 # ===== 新增一組 =====
 
-st.divider()
 st.subheader("➕ 新增一組")
 
-mode = st.radio(
-    "計算模式",
-    ["一般組合", "分區交叉"],
-    horizontal=True
-)
+top1, top2 = st.columns(2, gap="small")
 
-st.caption("一般組合：全部號碼一起算。分區交叉：A區 × B區 × C區，且同號自動排除。")
+with top1:
+    mode = st.radio(
+        "模式",
+        ["一般組合", "分區交叉"],
+        horizontal=True
+    )
 
-st.markdown("### 目前編輯區")
+with top2:
+    active_group = st.radio(
+        "編輯區",
+        ["A區", "B區", "C區", "D區"],
+        horizontal=True,
+        key="active_group"
+    )
 
-active_group = st.radio(
-    "選擇要編輯的區",
-    ["A區", "B區", "C區", "D區"],
-    horizontal=True,
-    key="active_group"
-)
+st.caption("點號碼可選取 / 再點一次可取消")
 
-st.markdown("### 01～39 快速選號")
+st.markdown("### 快速選號")
 render_number_pad(active_group)
 
 
-# ===== 已選號碼顯示 =====
+# ===== 已選號碼 =====
 
 st.markdown("### 已選號碼")
 
-for group_name in ["A區", "B區", "C區", "D區"]:
-    text = selected_to_text(st.session_state[group_name])
-    if not text:
-        text = "尚未選擇"
+s1, s2 = st.columns(2, gap="small")
 
-    st.markdown(
-        f"""
-        <div class="selected-box">
-            <b>{group_name}</b>：{text}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+with s1:
+    for group_name in ["A區", "B區"]:
+        text = selected_to_text(st.session_state[group_name])
+        if not text:
+            text = "尚未選擇"
 
-clear_col1, clear_col2, clear_col3, clear_col4 = st.columns(4)
+        st.markdown(
+            f"""
+            <div class="selected-box">
+                <b>{group_name}</b><br>{text}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-with clear_col1:
+with s2:
+    for group_name in ["C區", "D區"]:
+        text = selected_to_text(st.session_state[group_name])
+        if not text:
+            text = "尚未選擇"
+
+        st.markdown(
+            f"""
+            <div class="selected-box">
+                <b>{group_name}</b><br>{text}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+c1, c2, c3, c4 = st.columns(4, gap="small")
+
+with c1:
     st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-    if st.button("清A"):
+    if st.button("清A", use_container_width=True):
         st.session_state["A區"] = []
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-with clear_col2:
+with c2:
     st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-    if st.button("清B"):
+    if st.button("清B", use_container_width=True):
         st.session_state["B區"] = []
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-with clear_col3:
+with c3:
     st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-    if st.button("清C"):
+    if st.button("清C", use_container_width=True):
         st.session_state["C區"] = []
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-with clear_col4:
+with c4:
     st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-    if st.button("清D"):
+    if st.button("清D", use_container_width=True):
         st.session_state["D區"] = []
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
@@ -513,35 +530,16 @@ with clear_col4:
 # ===== 倍率 =====
 
 st.markdown("### 倍率")
-
-m1, m2, m3 = st.columns(3)
+m1, m2, m3 = st.columns(3, gap="small")
 
 with m1:
-    two_multiplier = st.number_input(
-        "二星",
-        min_value=0.0,
-        value=0.0,
-        step=0.1,
-        format="%.1f"
-    )
+    two_multiplier = st.number_input("二星", min_value=0.0, value=0.0, step=0.1, format="%.1f")
 
 with m2:
-    three_multiplier = st.number_input(
-        "三星",
-        min_value=0.0,
-        value=0.0,
-        step=0.1,
-        format="%.1f"
-    )
+    three_multiplier = st.number_input("三星", min_value=0.0, value=0.0, step=0.1, format="%.1f")
 
 with m3:
-    four_multiplier = st.number_input(
-        "四星",
-        min_value=0.0,
-        value=0.0,
-        step=0.1,
-        format="%.1f"
-    )
+    four_multiplier = st.number_input("四星", min_value=0.0, value=0.0, step=0.1, format="%.1f")
 
 
 # ===== 加入這組 =====
@@ -552,7 +550,7 @@ c_group = selected_to_text(st.session_state["C區"])
 d_group = selected_to_text(st.session_state["D區"])
 
 st.markdown('<div class="main-btn">', unsafe_allow_html=True)
-if st.button("加入這組", type="primary"):
+if st.button("加入這組", type="primary", use_container_width=True):
     if not a_group:
         st.warning("至少要選擇 A區號碼。")
     else:
@@ -569,65 +567,42 @@ if st.button("加入這組", type="primary"):
 
         st.session_state["lines"].append(new_line)
         st.session_state["calculate_clicked"] = False
-
         st.session_state["A區"] = []
         st.session_state["B區"] = []
         st.session_state["C區"] = []
         st.session_state["D區"] = []
 
-        st.success("已加入這組，A/B/C/D 已清空。")
+        st.success("已加入這組")
         st.rerun()
 st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ===== 單價設定 =====
 
-st.divider()
-st.subheader("💰 單價設定")
-
-p1, p2, p3 = st.columns(3)
+st.subheader("💰 單價")
+p1, p2, p3 = st.columns(3, gap="small")
 
 with p1:
-    price_2 = st.number_input(
-        "二星每支金額",
-        min_value=0.0,
-        value=10.0,
-        step=1.0
-    )
+    price_2 = st.number_input("二星每支", min_value=0.0, value=10.0, step=1.0)
 
 with p2:
-    price_3 = st.number_input(
-        "三星每支金額",
-        min_value=0.0,
-        value=10.0,
-        step=1.0
-    )
+    price_3 = st.number_input("三星每支", min_value=0.0, value=10.0, step=1.0)
 
 with p3:
-    price_4 = st.number_input(
-        "四星每支金額",
-        min_value=0.0,
-        value=10.0,
-        step=1.0
-    )
+    price_4 = st.number_input("四星每支", min_value=0.0, value=10.0, step=1.0)
 
 
 # ===== 已加入組別 =====
 
-st.divider()
-st.subheader("📝 目前已加入的組別")
-
-if len(st.session_state["lines"]) == 0:
-    st.info("目前還沒有加入任何組別。")
-else:
-    st.caption("可以直接在下面修改文字。分區交叉用 | 分隔。")
+st.subheader("📝 已加入組別")
 
 current_text = "\n".join(st.session_state["lines"])
 
 edited_text = st.text_area(
     "組別清單",
     value=current_text,
-    height=200,
+    height=160,
+    label_visibility="collapsed",
     placeholder="加入的組別會出現在這裡"
 )
 
@@ -637,14 +612,14 @@ st.session_state["lines"] = [
     if line.strip()
 ]
 
-btn_col1, btn_col2 = st.columns(2)
+b1, b2 = st.columns(2, gap="small")
 
-with btn_col1:
-    if st.button("開始計算", type="primary"):
+with b1:
+    if st.button("開始計算", type="primary", use_container_width=True):
         st.session_state["calculate_clicked"] = True
 
-with btn_col2:
-    if st.button("清空全部"):
+with b2:
+    if st.button("清空全部", use_container_width=True):
         st.session_state["lines"] = []
         st.session_state["calculate_clicked"] = False
         st.session_state["A區"] = []
@@ -664,17 +639,16 @@ if st.session_state["calculate_clicked"]:
     else:
         results, totals = calculate_results(lines, price_2, price_3, price_4)
 
-        st.divider()
         st.subheader("📊 總計")
 
-        c1, c2 = st.columns(2)
+        t1, t2 = st.columns(2, gap="small")
 
-        with c1:
+        with t1:
             st.metric("二星總支數", f"{format_num(totals['total_two_count'])} 支")
             st.metric("三星總支數", f"{format_num(totals['total_three_count'])} 支")
             st.metric("四星總支數", f"{format_num(totals['total_four_count'])} 支")
 
-        with c2:
+        with t2:
             st.metric("二星金額", f"{format_num(totals['total_two_cost'])} 元")
             st.metric("三星金額", f"{format_num(totals['total_three_cost'])} 元")
             st.metric("四星金額", f"{format_num(totals['total_four_cost'])} 元")
@@ -682,12 +656,7 @@ if st.session_state["calculate_clicked"]:
         st.metric("總金額", f"{format_num(totals['total_cost'])} 元")
 
         st.subheader("📋 詳細結果")
-
-        st.dataframe(
-            results,
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(results, use_container_width=True, hide_index=True)
 
         warning_items = [
             item for item in results
