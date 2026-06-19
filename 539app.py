@@ -376,9 +376,9 @@ def render_number_pad(group_key):
     numbers = list(range(1, 40))
 
     # 每排 6 顆，手機比較緊湊
-    for row_start in range(0, 39, 6):
-        row_nums = numbers[row_start:row_start + 6]
-        cols = st.columns(6, gap="small")
+    for row_start in range(0, 39, 10):
+        row_nums = numbers[row_start:row_start + 10]
+        cols = st.columns(10, gap="small")
 
         for i, num in enumerate(row_nums):
             selected = num in st.session_state[group_key]
