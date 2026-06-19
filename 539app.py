@@ -38,7 +38,7 @@ st.markdown(
 
     .stButton > button {
         width: 100%;
-        border-radius: 10px;
+        border-radius: 8px;
         font-weight: 600;
     }
 
@@ -106,52 +106,34 @@ st.markdown(
         background: #fafafa;
     }
 
-    /* 號碼按鈕區：真正的手機緊湊排列 */
-    .number-grid {
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: 5px;
-        margin-top: 4px;
-        margin-bottom: 8px;
+    /* 強制 Streamlit columns 在手機不要直排 */
+    div[data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 0.16rem !important;
     }
 
-    .number-button {
-        width: 100%;
-        height: 32px;
-        border-radius: 8px;
-        border: 1px solid #d1d5db;
-        background: #ffffff;
-        color: #111827;
-        font-size: 0.82rem;
-        font-weight: 600;
-        text-align: center;
-        line-height: 30px;
-        text-decoration: none;
-        display: block;
-        box-sizing: border-box;
+    div[data-testid="column"] {
+        min-width: 0 !important;
+        flex: 1 1 0 !important;
+        padding-left: 0.02rem !important;
+        padding-right: 0.02rem !important;
     }
 
-    .number-button.selected {
-        background: #fb923c;
-        border-color: #f97316;
-        color: white;
-    }
-
-    .number-button:hover {
-        background: #fed7aa;
-        color: #111827;
+    .num-btn button {
+        height: 1.75rem !important;
+        min-height: 1.75rem !important;
+        font-size: 0.68rem !important;
+        padding: 0 !important;
+        border-radius: 7px !important;
     }
 
     @media (max-width: 390px) {
-        .number-grid {
-            grid-template-columns: repeat(5, 1fr);
-            gap: 5px;
-        }
-
-        .number-button {
-            height: 31px;
-            line-height: 29px;
-            font-size: 0.78rem;
+        .num-btn button {
+            height: 1.65rem !important;
+            min-height: 1.65rem !important;
+            font-size: 0.64rem !important;
         }
     }
     </style>
@@ -393,22 +375,23 @@ def add_or_remove_number(group_key, num):
 def render_number_pad(group_key):
     numbers = list(range(1, 40))
 
-    html = '<div class="number-grid">'
+    # 每排 6 顆，手機比較緊湊
+    for row_start in range(0, 39, 6):
+        row_nums = numbers[row_start:row_start + 6]
+        cols = st.columns(6, gap="small")
 
-    for num in numbers:
-        selected = num in st.session_state[group_key]
-        label = f"✓{num:02d}" if selected else f"{num:02d}"
-        selected_class = "selected" if selected else ""
+        for i, num in enumerate(row_nums):
+            selected = num in st.session_state[group_key]
+            label = f"✓{num:02d}" if selected else f"{num:02d}"
 
-        html += f"""
-        <a class="number-button {selected_class}" href="?toggle={group_key}_{num}">
-            {label}
-        </a>
-        """
+            with cols[i]:
+                st.markdown('<div class="num-btn">', unsafe_allow_html=True)
 
-    html += "</div>"
+                if st.button(label, key=f"{group_key}_{num}", use_container_width=True):
+                    add_or_remove_number(group_key, num)
+                    st.rerun()
 
-    st.markdown(html, unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ===== Session State =====
@@ -425,27 +408,6 @@ if "active_group" not in st.session_state:
 for key in ["A區", "B區", "C區", "D區"]:
     if key not in st.session_state:
         st.session_state[key] = []
-
-
-# ===== 處理 HTML 按鈕點擊 =====
-
-query_params = st.query_params
-
-if "toggle" in query_params:
-    toggle_value = query_params["toggle"]
-
-    try:
-        group_key, num_text = toggle_value.split("_")
-        num = int(num_text)
-
-        if group_key in ["A區", "B區", "C區", "D區"] and 1 <= num <= 39:
-            add_or_remove_number(group_key, num)
-
-    except Exception:
-        pass
-
-    st.query_params.clear()
-    st.rerun()
 
 
 # ===== 照片區 =====
