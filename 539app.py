@@ -128,7 +128,12 @@ st.markdown(
         padding: 0 !important;
         border-radius: 7px !important;
     }
-
+    
+    .num-btn {
+        margin-top: -0.35rem !important;
+        margin-bottom: -0.35rem !important;
+    }
+    
     @media (max-width: 390px) {
         .num-btn button {
             height: 1.65rem !important;
