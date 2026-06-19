@@ -1,9 +1,7 @@
 import streamlit as st
 import math
 import re
-import base64
-import json
-from openai import OpenAI
+import itertools
 
 st.set_page_config(
     page_title="539 快速計算器",
@@ -13,101 +11,53 @@ st.set_page_config(
 
 st.title("🎯 539 快速計算器")
 
-st.write(
-    "每一行代表一組號碼，後面可加二星、三星、四星倍率。"
-    "例如：`01 02 03 11 16 32 35 38 二x0.1 三x1 四x0`"
-)
+st.write("""
+每一行代表一組號碼。
+
+支援兩種格式：
+
+1. 一般組合：
+`01 02 03 11 16 32 35 38 二x0.1 三x0 四x0`
+
+2. 分區交叉：
+`02 18 36 06 | 03 04 07 31 二x1 三x0 四x0`
+
+3. 多區交叉：
+`07 14 21 36 | 17 20 23 38 | 13 24 27 37 29 二x0.1 三x0.1 四x0`
+""")
 
 uploaded_file = st.file_uploader(
-    "上傳彩券照片",
+    "上傳彩券照片（目前先顯示照片）",
     type=["jpg", "jpeg", "png"]
 )
-
-ai_text = ""
 
 if uploaded_file is not None:
     st.image(uploaded_file, caption="已上傳的照片", use_container_width=True)
 
-    if st.button("AI 辨識照片"):
-        with st.spinner("AI 正在辨識照片，請稍等..."):
-            image_bytes = uploaded_file.getvalue()
-            image_base64 = base64.b64encode(image_bytes).decode("utf-8")
-
-            client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-            prompt = """
-你是一個彩券539手寫單辨識助手。
-
-請從圖片中辨識每一組號碼與下注倍率，並整理成「每行一組」的文字格式。
-
-重要規則：
-1. 只辨識 01 到 39 的號碼。
-2. 每一組號碼下方或旁邊會有二星、三星、四星倍率。
-3. 倍率可能寫成：
-   - 二x1、三x0.1、四x0.5
-   - 2x1、3x0.1、4x0.5
-   - 二×1、三×0.1、四×0.5
-4. 如果某一星沒有看到倍率，請填 0。
-5. 請輸出純文字，不要解釋。
-6. 每一行格式必須是：
-   號碼們 二x倍率 三x倍率 四x倍率
-7. 號碼請用兩位數格式，例如 1 要寫成 01。
-8. 不確定的號碼請用 ? 表示，例如 ?7，不要亂猜。
-9. 不要輸出 JSON。
-
-範例輸出：
-01 02 03 11 16 32 35 38 二x0.1 三x0 四x0
-02 18 36 06 03 04 07 31 二x1 三x0 四x0
-05 14 27 06 19 26 38 二x0.5 三x0.1 四x0
-"""
-
-            response = client.responses.create(
-                model="gpt-5.5",
-                input=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": prompt
-                            },
-                            {
-                                "type": "input_image",
-                                "image_url": f"data:image/jpeg;base64,{image_base64}"
-                            }
-                        ]
-                    }
-                ]
-            )
-
-            ai_text = response.output_text.strip()
-            st.session_state["input_text"] = ai_text
-            st.success("辨識完成，請檢查下面的號碼是否正確。")
-
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    price_2 = st.number_input("二星每組金額", min_value=0.0, value=10.0, step=1.0)
+    price_2 = st.number_input("二星每支金額", min_value=0.0, value=10.0, step=1.0)
 
 with col2:
-    price_3 = st.number_input("三星每組金額", min_value=0.0, value=10.0, step=1.0)
+    price_3 = st.number_input("三星每支金額", min_value=0.0, value=10.0, step=1.0)
 
 with col3:
-    price_4 = st.number_input("四星每組金額", min_value=0.0, value=10.0, step=1.0)
+    price_4 = st.number_input("四星每支金額", min_value=0.0, value=10.0, step=1.0)
 
 
 default_text = """01 02 03 11 16 32 35 38 二x0.1 三x0 四x0
-02 18 36 06 03 04 07 31 二x1 三x0 四x0
-05 14 27 06 19 26 38 二x0.5 三x0.1 四x0
+02 18 36 06 | 03 04 07 31 二x1 三x0 四x0
+07 14 21 36 | 17 20 23 38 | 13 24 27 37 29 二x0.1 三x0.1 四x0
 01 19 二x4 三x0 四x0"""
 
 if "input_text" not in st.session_state:
     st.session_state["input_text"] = default_text
 
 input_text = st.text_area(
-    "輸入號碼 / AI 辨識結果",
+    "輸入號碼",
     key="input_text",
-    height=260
+    height=300
 )
 
 
@@ -117,12 +67,13 @@ def combination(n, r):
     return math.comb(n, r)
 
 
+def format_num(value):
+    if abs(value - round(value)) < 0.0000001:
+        return str(int(round(value)))
+    return f"{value:.2f}"
+
+
 def parse_multiplier(line, star_patterns):
-    """
-    從一行文字中抓倍率。
-    star_patterns 例如 ["二", "2"]。
-    可辨識：二x0.1、二X1、二×0.5、2x1、2X0.1、2×0.5
-    """
     pattern = r"(" + "|".join(star_patterns) + r")\s*[xX×]\s*(\d+(\.\d+)?)"
     match = re.search(pattern, line)
 
@@ -134,15 +85,8 @@ def parse_multiplier(line, star_patterns):
     return 0.0, line
 
 
-def parse_line(line):
-    original_line = line
-
-    two_multiplier, line = parse_multiplier(line, ["二", "2"])
-    three_multiplier, line = parse_multiplier(line, ["三", "3"])
-    four_multiplier, line = parse_multiplier(line, ["四", "4"])
-
-    # 剩下的 1~2 位數字才當作號碼
-    number_matches = re.findall(r"\d{1,2}", line)
+def parse_numbers(text):
+    number_matches = re.findall(r"\d{1,2}", text)
 
     numbers = []
     invalid_numbers = []
@@ -158,21 +102,97 @@ def parse_line(line):
     unique_numbers = sorted(set(numbers))
     duplicate_count = len(numbers) - len(unique_numbers)
 
-    return {
-        "original_line": original_line,
-        "numbers": unique_numbers,
-        "two_multiplier": two_multiplier,
-        "three_multiplier": three_multiplier,
-        "four_multiplier": four_multiplier,
-        "invalid_numbers": invalid_numbers,
-        "duplicate_count": duplicate_count
-    }
+    return unique_numbers, invalid_numbers, duplicate_count
 
 
-def format_num(value):
-    if abs(value - round(value)) < 0.0000001:
-        return str(int(round(value)))
-    return f"{value:.2f}"
+def cross_group_count(groups, star):
+    """
+    分區交叉計算：
+    二星：任選 2 區，各取 1 個號碼，相乘後加總
+    三星：任選 3 區，各取 1 個號碼，相乘後加總
+    四星：任選 4 區，各取 1 個號碼，相乘後加總
+    """
+    if len(groups) < star:
+        return 0
+
+    total = 0
+
+    for selected_groups in itertools.combinations(groups, star):
+        count = 1
+
+        for group in selected_groups:
+            count *= len(group)
+
+        total += count
+
+    return total
+
+
+def parse_line(line):
+    original_line = line
+
+    two_multiplier, line = parse_multiplier(line, ["二", "2"])
+    three_multiplier, line = parse_multiplier(line, ["三", "3"])
+    four_multiplier, line = parse_multiplier(line, ["四", "4"])
+
+    is_cross_group = "|" in line
+
+    all_invalid_numbers = []
+    total_duplicate_count = 0
+
+    if is_cross_group:
+        group_texts = [part.strip() for part in line.split("|") if part.strip()]
+        groups = []
+
+        for group_text in group_texts:
+            numbers, invalid_numbers, duplicate_count = parse_numbers(group_text)
+
+            if numbers:
+                groups.append(numbers)
+
+            all_invalid_numbers.extend(invalid_numbers)
+            total_duplicate_count += duplicate_count
+
+        all_numbers = sorted(set(num for group in groups for num in group))
+
+        return {
+            "original_line": original_line,
+            "mode": "分區交叉",
+            "groups": groups,
+            "numbers": all_numbers,
+            "two_multiplier": two_multiplier,
+            "three_multiplier": three_multiplier,
+            "four_multiplier": four_multiplier,
+            "invalid_numbers": all_invalid_numbers,
+            "duplicate_count": total_duplicate_count
+        }
+
+    else:
+        numbers, invalid_numbers, duplicate_count = parse_numbers(line)
+
+        return {
+            "original_line": original_line,
+            "mode": "一般組合",
+            "groups": [],
+            "numbers": numbers,
+            "two_multiplier": two_multiplier,
+            "three_multiplier": three_multiplier,
+            "four_multiplier": four_multiplier,
+            "invalid_numbers": invalid_numbers,
+            "duplicate_count": duplicate_count
+        }
+
+
+def group_display(groups):
+    if not groups:
+        return ""
+
+    display_parts = []
+
+    for group in groups:
+        display_parts.append("、".join(f"{num:02d}" for num in group))
+
+    return "  ×  ".join(display_parts)
 
 
 if st.button("開始計算", type="primary"):
@@ -196,11 +216,19 @@ if st.button("開始計算", type="primary"):
         parsed = parse_line(line)
 
         numbers = parsed["numbers"]
+        groups = parsed["groups"]
+        mode = parsed["mode"]
+
         n = len(numbers)
 
-        two_base = combination(n, 2)
-        three_base = combination(n, 3)
-        four_base = combination(n, 4)
+        if mode == "分區交叉":
+            two_base = cross_group_count(groups, 2)
+            three_base = cross_group_count(groups, 3)
+            four_base = cross_group_count(groups, 4)
+        else:
+            two_base = combination(n, 2)
+            three_base = combination(n, 3)
+            four_base = combination(n, 4)
 
         two_multiplier = parsed["two_multiplier"]
         three_multiplier = parsed["three_multiplier"]
@@ -224,18 +252,20 @@ if st.button("開始計算", type="primary"):
 
         results.append({
             "區塊": index,
+            "模式": mode,
             "原始輸入": parsed["original_line"],
-            "號碼": "、".join(f"{num:02d}" for num in numbers),
+            "分區": group_display(groups),
+            "全部號碼": "、".join(f"{num:02d}" for num in numbers),
             "號碼數": n,
             "二星倍率": two_multiplier,
             "三星倍率": three_multiplier,
             "四星倍率": four_multiplier,
-            "二星原始組數": two_base,
-            "三星原始組數": three_base,
-            "四星原始組數": four_base,
-            "二星實際組數": two_actual,
-            "三星實際組數": three_actual,
-            "四星實際組數": four_actual,
+            "二星原始支數": two_base,
+            "三星原始支數": three_base,
+            "四星原始支數": four_base,
+            "二星實際支數": two_actual,
+            "三星實際支數": three_actual,
+            "四星實際支數": four_actual,
             "二星金額": two_cost,
             "三星金額": three_cost,
             "四星金額": four_cost,
@@ -251,15 +281,15 @@ if st.button("開始計算", type="primary"):
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        st.metric("二星總組數", f"{format_num(total_two_count)} 組")
+        st.metric("二星總支數", f"{format_num(total_two_count)} 支")
         st.metric("二星金額", f"{format_num(total_two_cost)} 元")
 
     with c2:
-        st.metric("三星總組數", f"{format_num(total_three_count)} 組")
+        st.metric("三星總支數", f"{format_num(total_three_count)} 支")
         st.metric("三星金額", f"{format_num(total_three_cost)} 元")
 
     with c3:
-        st.metric("四星總組數", f"{format_num(total_four_count)} 組")
+        st.metric("四星總支數", f"{format_num(total_four_count)} 支")
         st.metric("四星金額", f"{format_num(total_four_cost)} 元")
 
     with c4:
