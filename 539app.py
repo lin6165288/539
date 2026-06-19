@@ -106,39 +106,48 @@ st.markdown(
         background: #fafafa;
     }
 
-    /* 強制 Streamlit columns 在手機不要直排 */
+    /* 強制 Streamlit columns 在手機不要直排，並壓縮號碼按鈕間距 */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
-        gap: 0.16rem !important;
+        gap: 0.04rem !important;
     }
-
+    
     div[data-testid="column"] {
         min-width: 0 !important;
         flex: 1 1 0 !important;
-        padding-left: 0.02rem !important;
-        padding-right: 0.02rem !important;
-    }
-
-    .num-btn button {
-        height: 1rem !important;
-        min-height: 1rem !important;
-        font-size: 0.68rem !important;
-        padding: 0 !important;
-        border-radius: 7px !important;
+        padding-left: 0rem !important;
+        padding-right: 0rem !important;
     }
     
+    /* 壓縮每一排號碼按鈕的上下距離 */
     .num-btn {
         margin-top: -0.35rem !important;
         margin-bottom: -0.35rem !important;
     }
     
+    /* 數字按鈕本體 */
+    .num-btn button {
+        height: 1.45rem !important;
+        min-height: 1.45rem !important;
+        font-size: 0.62rem !important;
+        padding: 0 !important;
+        border-radius: 6px !important;
+    }
+    
+    /* 螢幕更窄時再縮小一點 */
     @media (max-width: 390px) {
+        .num-btn {
+            margin-top: -0.42rem !important;
+            margin-bottom: -0.42rem !important;
+        }
+    
         .num-btn button {
-            height: 1.65rem !important;
-            min-height: 1.65rem !important;
-            font-size: 0.64rem !important;
+            height: 1.35rem !important;
+            min-height: 1.35rem !important;
+            font-size: 0.58rem !important;
+            border-radius: 5px !important;
         }
     }
     </style>
