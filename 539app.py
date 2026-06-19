@@ -15,37 +15,68 @@ st.markdown(
     """
     <style>
     .block-container {
-        padding-top: 0.6rem;
-        padding-left: 0.7rem;
-        padding-right: 0.7rem;
+        padding-top: 0.4rem;
+        padding-left: 0.45rem;
+        padding-right: 0.45rem;
         max-width: 900px;
     }
 
     h1 {
-        font-size: 1.45rem !important;
-        margin-bottom: 0.3rem !important;
+        font-size: 1.35rem !important;
+        margin-bottom: 0.2rem !important;
     }
 
     h2, h3 {
-        font-size: 1.1rem !important;
+        font-size: 1.05rem !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.4rem !important;
     }
 
     .stButton > button {
         width: 100%;
-        height: 2.8rem;
-        font-size: 1rem;
-        border-radius: 12px;
+        border-radius: 8px;
         font-weight: 600;
+    }
+
+    div[data-testid="stHorizontalBlock"] {
+        gap: 0.25rem !important;
+        flex-wrap: nowrap !important;
+    }
+
+    div[data-testid="column"] {
+        min-width: 0 !important;
+        padding-left: 0.05rem !important;
+        padding-right: 0.05rem !important;
+    }
+
+    .number-pad button {
+        height: 2.15rem !important;
+        min-height: 2.15rem !important;
+        font-size: 0.78rem !important;
+        padding: 0 !important;
+        border-radius: 8px !important;
+    }
+
+    .main-button button {
+        height: 2.8rem !important;
+        font-size: 1rem !important;
+        border-radius: 12px !important;
+    }
+
+    .small-button button {
+        height: 2.2rem !important;
+        font-size: 0.8rem !important;
+        padding: 0 !important;
     }
 
     .stNumberInput input {
         font-size: 1rem;
-        height: 2.7rem;
+        height: 2.5rem;
     }
 
     textarea {
-        font-size: 0.95rem !important;
-        line-height: 1.5 !important;
+        font-size: 0.9rem !important;
+        line-height: 1.4 !important;
     }
 
     div[data-testid="stMetric"] {
@@ -56,11 +87,20 @@ st.markdown(
     }
 
     div[data-testid="stMetricLabel"] {
-        font-size: 0.85rem;
+        font-size: 0.82rem;
     }
 
     div[data-testid="stMetricValue"] {
-        font-size: 1.15rem;
+        font-size: 1.1rem;
+    }
+
+    .selected-box {
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        padding: 7px;
+        margin-bottom: 5px;
+        font-size: 0.88rem;
     }
 
     .sticky-photo {
@@ -68,20 +108,16 @@ st.markdown(
         top: 0;
         z-index: 999;
         background: white;
-        padding: 6px 0 8px 0;
+        padding: 5px 0 7px 0;
         border-bottom: 2px solid #f97316;
     }
 
     .sticky-photo img {
         width: 100%;
         object-fit: contain;
-        border-radius: 12px;
+        border-radius: 10px;
         border: 1px solid #ddd;
         background: #fafafa;
-    }
-
-    div[data-baseweb="select"] {
-        font-size: 1rem;
     }
     </style>
     """,
@@ -89,7 +125,7 @@ st.markdown(
 )
 
 st.title("🎯 539 快速計算器")
-st.caption("上傳照片當參考，用 A/B/C/D 下拉選號，系統自動計算支數與金額。")
+st.caption("上傳照片當參考，用 01～39 按鈕快速選號，系統自動計算。")
 
 
 # ===== 工具函式 =====
@@ -127,15 +163,6 @@ def parse_numbers(text):
 
 
 def cross_group_count(groups, star):
-    """
-    分區交叉計算，且同一支內同號要排除。
-
-    二星：任選 2 區，各取 1 個號碼
-    三星：任選 3 區，各取 1 個號碼
-    四星：任選 4 區，各取 1 個號碼
-
-    若同一支裡出現重複號碼，該支不計算。
-    """
     if len(groups) < star:
         return 0
 
@@ -154,6 +181,7 @@ def group_display(groups):
         return ""
 
     display_parts = []
+
     for group in groups:
         display_parts.append("、".join(f"{num:02d}" for num in group))
 
@@ -161,7 +189,7 @@ def group_display(groups):
 
 
 def selected_to_text(nums):
-    return " ".join(nums)
+    return " ".join(f"{num:02d}" for num in sorted(nums))
 
 
 def line_from_form(a, b, c, d, two_m, three_m, four_m, mode):
@@ -327,6 +355,40 @@ def calculate_results(lines, price_2, price_3, price_4):
     return results, totals
 
 
+def add_or_remove_number(group_key, num):
+    if num in st.session_state[group_key]:
+        st.session_state[group_key].remove(num)
+    else:
+        st.session_state[group_key].append(num)
+
+
+def render_number_pad(group_key):
+    numbers = list(range(1, 40))
+
+    st.markdown('<div class="number-pad">', unsafe_allow_html=True)
+
+    for row_start in range(0, 39, 10):
+        cols = st.columns(10)
+
+        for i, col in enumerate(cols):
+            index = row_start + i
+
+            if index >= len(numbers):
+                continue
+
+            num = numbers[index]
+            selected = num in st.session_state[group_key]
+
+            label = f"✓{num:02d}" if selected else f"{num:02d}"
+
+            with col:
+                if st.button(label, key=f"{group_key}_{num}"):
+                    add_or_remove_number(group_key, num)
+                    st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
 # ===== Session State =====
 
 if "lines" not in st.session_state:
@@ -334,6 +396,9 @@ if "lines" not in st.session_state:
 
 if "calculate_clicked" not in st.session_state:
     st.session_state["calculate_clicked"] = False
+
+if "active_group" not in st.session_state:
+    st.session_state["active_group"] = "A區"
 
 for key in ["A區", "B區", "C區", "D區"]:
     if key not in st.session_state:
@@ -357,9 +422,9 @@ photo_height = st.radio(
 )
 
 height_map = {
-    "小": "160px",
-    "中": "240px",
-    "大": "360px"
+    "小": "140px",
+    "中": "220px",
+    "大": "330px"
 }
 
 if uploaded_file is not None:
@@ -393,46 +458,63 @@ mode = st.radio(
 st.caption("一般組合：全部號碼一起算。分區交叉：A區 × B區 × C區，且同號自動排除。")
 
 
-# ===== 快速選號：手機下拉多選版 =====
+# ===== 選區 =====
 
-st.markdown("### 🔢 快速選號")
+st.markdown("### 目前編輯區")
 
-number_options = [f"{i:02d}" for i in range(1, 40)]
-
-a_selected = st.multiselect(
-    "A區號碼",
-    number_options,
-    default=st.session_state.get("A區", []),
-    placeholder="點這裡選 A區號碼"
+active_group = st.radio(
+    "選擇要編輯的區",
+    ["A區", "B區", "C區", "D區"],
+    horizontal=True,
+    key="active_group"
 )
 
-b_selected = st.multiselect(
-    "B區號碼",
-    number_options,
-    default=st.session_state.get("B區", []),
-    placeholder="點這裡選 B區號碼"
-)
+st.markdown("### 01～39 快速選號")
 
-c_selected = st.multiselect(
-    "C區號碼",
-    number_options,
-    default=st.session_state.get("C區", []),
-    placeholder="點這裡選 C區號碼"
-)
+render_number_pad(active_group)
 
-d_selected = st.multiselect(
-    "D區號碼",
-    number_options,
-    default=st.session_state.get("D區", []),
-    placeholder="點這裡選 D區號碼"
-)
 
-st.session_state["A區"] = a_selected
-st.session_state["B區"] = b_selected
-st.session_state["C區"] = c_selected
-st.session_state["D區"] = d_selected
+# ===== 已選號碼顯示 =====
 
-st.caption("點每個區塊的選單後，可以一次勾多個號碼。")
+st.markdown("### 已選號碼")
+
+for group_name in ["A區", "B區", "C區", "D區"]:
+    text = selected_to_text(st.session_state[group_name])
+
+    if not text:
+        text = "尚未選擇"
+
+    st.markdown(
+        f"""
+        <div class="selected-box">
+            <b>{group_name}</b>：{text}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+clear_col1, clear_col2, clear_col3, clear_col4 = st.columns(4)
+
+with clear_col1:
+    if st.button("清A"):
+        st.session_state["A區"] = []
+        st.rerun()
+
+with clear_col2:
+    if st.button("清B"):
+        st.session_state["B區"] = []
+        st.rerun()
+
+with clear_col3:
+    if st.button("清C"):
+        st.session_state["C區"] = []
+        st.rerun()
+
+with clear_col4:
+    if st.button("清D"):
+        st.session_state["D區"] = []
+        st.rerun()
 
 
 # ===== 倍率 =====
@@ -476,6 +558,8 @@ b_group = selected_to_text(st.session_state["B區"])
 c_group = selected_to_text(st.session_state["C區"])
 d_group = selected_to_text(st.session_state["D區"])
 
+st.markdown('<div class="main-button">', unsafe_allow_html=True)
+
 if st.button("加入這組", type="primary"):
     if not a_group:
         st.warning("至少要選擇 A區號碼。")
@@ -501,6 +585,8 @@ if st.button("加入這組", type="primary"):
 
         st.success("已加入這組，A/B/C/D 已清空。")
         st.rerun()
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ===== 單價設定 =====
@@ -550,7 +636,7 @@ current_text = "\n".join(st.session_state["lines"])
 edited_text = st.text_area(
     "組別清單",
     value=current_text,
-    height=220,
+    height=200,
     placeholder="加入的組別會出現在這裡"
 )
 
