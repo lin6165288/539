@@ -38,13 +38,6 @@ st.markdown(
         font-weight: 600;
     }
 
-    .number-btn button {
-        height: 2.5rem !important;
-        font-size: 0.9rem !important;
-        border-radius: 10px !important;
-        padding: 0 !important;
-    }
-
     .stNumberInput input {
         font-size: 1rem;
         height: 2.7rem;
@@ -70,15 +63,6 @@ st.markdown(
         font-size: 1.15rem;
     }
 
-    .selected-box {
-        background: #f8fafc;
-        border: 1px solid #cbd5e1;
-        border-radius: 12px;
-        padding: 10px;
-        margin-bottom: 8px;
-        font-size: 0.95rem;
-    }
-
     .sticky-photo {
         position: sticky;
         top: 0;
@@ -95,13 +79,17 @@ st.markdown(
         border: 1px solid #ddd;
         background: #fafafa;
     }
+
+    div[data-baseweb="select"] {
+        font-size: 1rem;
+    }
     </style>
     """,
     unsafe_allow_html=True
 )
 
 st.title("🎯 539 快速計算器")
-st.caption("上傳照片當參考，用 01～39 按鈕快速選號，系統自動計算支數與金額。")
+st.caption("上傳照片當參考，用 A/B/C/D 下拉選號，系統自動計算支數與金額。")
 
 
 # ===== 工具函式 =====
@@ -141,6 +129,12 @@ def parse_numbers(text):
 def cross_group_count(groups, star):
     """
     分區交叉計算，且同一支內同號要排除。
+
+    二星：任選 2 區，各取 1 個號碼
+    三星：任選 3 區，各取 1 個號碼
+    四星：任選 4 區，各取 1 個號碼
+
+    若同一支裡出現重複號碼，該支不計算。
     """
     if len(groups) < star:
         return 0
@@ -164,6 +158,10 @@ def group_display(groups):
         display_parts.append("、".join(f"{num:02d}" for num in group))
 
     return "  ×  ".join(display_parts)
+
+
+def selected_to_text(nums):
+    return " ".join(nums)
 
 
 def line_from_form(a, b, c, d, two_m, three_m, four_m, mode):
@@ -329,39 +327,6 @@ def calculate_results(lines, price_2, price_3, price_4):
     return results, totals
 
 
-def selected_to_text(nums):
-    return " ".join(f"{num:02d}" for num in sorted(nums))
-
-
-def add_or_remove_number(group_key, num):
-    if num in st.session_state[group_key]:
-        st.session_state[group_key].remove(num)
-    else:
-        st.session_state[group_key].append(num)
-
-
-def render_number_pad(group_key):
-    numbers = list(range(1, 40))
-
-    for row_start in range(0, 39, 5):
-        cols = st.columns(5)
-
-        for i, col in enumerate(cols):
-            index = row_start + i
-            if index >= len(numbers):
-                continue
-
-            num = numbers[index]
-            selected = num in st.session_state[group_key]
-
-            label = f"✅ {num:02d}" if selected else f"{num:02d}"
-
-            with col:
-                if st.button(label, key=f"{group_key}_{num}", help=f"選擇 {num:02d}"):
-                    add_or_remove_number(group_key, num)
-                    st.rerun()
-
-
 # ===== Session State =====
 
 if "lines" not in st.session_state:
@@ -369,9 +334,6 @@ if "lines" not in st.session_state:
 
 if "calculate_clicked" not in st.session_state:
     st.session_state["calculate_clicked"] = False
-
-if "active_group" not in st.session_state:
-    st.session_state["active_group"] = "A區"
 
 for key in ["A區", "B區", "C區", "D區"]:
     if key not in st.session_state:
@@ -431,62 +393,46 @@ mode = st.radio(
 st.caption("一般組合：全部號碼一起算。分區交叉：A區 × B區 × C區，且同號自動排除。")
 
 
-# ===== 選區 =====
+# ===== 快速選號：手機下拉多選版 =====
 
-st.markdown("### 目前編輯區")
+st.markdown("### 🔢 快速選號")
 
-active_group = st.radio(
-    "選擇要編輯的區",
-    ["A區", "B區", "C區", "D區"],
-    horizontal=True,
-    key="active_group"
+number_options = [f"{i:02d}" for i in range(1, 40)]
+
+a_selected = st.multiselect(
+    "A區號碼",
+    number_options,
+    default=st.session_state.get("A區", []),
+    placeholder="點這裡選 A區號碼"
 )
 
-st.markdown("### 01～39 快速選號")
+b_selected = st.multiselect(
+    "B區號碼",
+    number_options,
+    default=st.session_state.get("B區", []),
+    placeholder="點這裡選 B區號碼"
+)
 
-render_number_pad(active_group)
+c_selected = st.multiselect(
+    "C區號碼",
+    number_options,
+    default=st.session_state.get("C區", []),
+    placeholder="點這裡選 C區號碼"
+)
 
+d_selected = st.multiselect(
+    "D區號碼",
+    number_options,
+    default=st.session_state.get("D區", []),
+    placeholder="點這裡選 D區號碼"
+)
 
-# ===== 已選號碼顯示 =====
+st.session_state["A區"] = a_selected
+st.session_state["B區"] = b_selected
+st.session_state["C區"] = c_selected
+st.session_state["D區"] = d_selected
 
-st.markdown("### 已選號碼")
-
-for group_name in ["A區", "B區", "C區", "D區"]:
-    text = selected_to_text(st.session_state[group_name])
-    if not text:
-        text = "尚未選擇"
-
-    st.markdown(
-        f"""
-        <div class="selected-box">
-            <b>{group_name}</b>：{text}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-clear_col1, clear_col2, clear_col3, clear_col4 = st.columns(4)
-
-with clear_col1:
-    if st.button("清 A"):
-        st.session_state["A區"] = []
-        st.rerun()
-
-with clear_col2:
-    if st.button("清 B"):
-        st.session_state["B區"] = []
-        st.rerun()
-
-with clear_col3:
-    if st.button("清 C"):
-        st.session_state["C區"] = []
-        st.rerun()
-
-with clear_col4:
-    if st.button("清 D"):
-        st.session_state["D區"] = []
-        st.rerun()
+st.caption("點每個區塊的選單後，可以一次勾多個號碼。")
 
 
 # ===== 倍率 =====
