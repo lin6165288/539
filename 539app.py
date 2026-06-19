@@ -575,13 +575,30 @@ def build_redeem_ticket(ticket_name, line, result_row):
     }
 
 
+def get_next_redeem_ticket_name():
+    """
+    兌獎區的「第幾張」是依照每次按下開始計算來編號，
+    不是依照同一次計算裡有幾行組別來編號。
+    例如：第 1 次開始計算有 1 行 => 第1張
+          第 2 次開始計算有 2 行 => 兩行都算第2張
+    """
+    existing_names = []
+
+    for ticket in st.session_state.get("redeem_tickets", []):
+        ticket_name = ticket.get("票名", "")
+        if ticket_name and ticket_name not in existing_names:
+            existing_names.append(ticket_name)
+
+    return f"第{len(existing_names) + 1}張"
+
+
 def save_current_calculation_to_redeem(lines, price_2, price_3, price_4, price_car):
     results, _ = calculate_results(lines, price_2, price_3, price_4, price_car)
 
-    start_no = len(st.session_state["redeem_tickets"]) + 1
+    # 同一次按下「開始計算」的所有組別，都歸在同一張票名底下
+    ticket_name = get_next_redeem_ticket_name()
 
     for index, line in enumerate(lines):
-        ticket_name = f"第{start_no + index}張"
         ticket = build_redeem_ticket(ticket_name, line, results[index])
         st.session_state["redeem_tickets"].append(ticket)
 
@@ -963,7 +980,7 @@ if st.session_state["calculate_clicked"]:
 # ===== 兌獎區 =====
 
 st.subheader("🎁 兌獎區")
-st.caption("按下『開始計算』後，會依序自動存成第1張、第2張……。輸入當期 5 個開獎號碼後，會自動計算每張中了多少支。")
+st.caption("每按一次『開始計算』會自動存成同一張票，例如同一次有兩組號碼，兩組都會記成同一張。輸入當期 5 個開獎號碼後，會自動計算每張中了多少支。")
 
 if len(st.session_state["redeem_tickets"]) == 0:
     st.info("目前兌獎區還沒有資料。請先按『開始計算』，系統會自動把計算內容存進來。")
