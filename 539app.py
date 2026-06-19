@@ -166,13 +166,16 @@ st.markdown(
 )
 
 st.title("🎯 539 快速計算器")
-st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉。")
+st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉；車＝號碼數 × 倍率 × 38。")
+
+
+# ===== 基本設定 =====
+
+GROUP_KEYS = ["A區", "B區", "C區", "D區", "E區", "F區", "G區", "H區"]
+QUICK_VALUES = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0]
 
 
 # ===== 工具函式 =====
-
-GROUP_KEYS = ["A區", "B區", "C區", "D區", "E區", "F區", "G區", "H區"]
-
 
 def combination(n, r):
     if n < r:
@@ -206,10 +209,6 @@ def parse_numbers(text):
 
 
 def cross_group_count(groups, star):
-    """
-    分區交叉計算。
-    因為輸入階段已禁止跨區重複號，這裡仍保留同號排除保護。
-    """
     if len(groups) < star:
         return 0
 
@@ -245,13 +244,13 @@ def get_filled_group_texts():
     return group_texts
 
 
-def infer_line_from_groups(two_m, three_m, four_m):
+def infer_line_from_groups(two_m, three_m, four_m, car_m):
     group_texts = get_filled_group_texts()
 
     if len(group_texts) == 1:
-        return f"{group_texts[0]} 二x{two_m:g} 三x{three_m:g} 四x{four_m:g}"
+        return f"{group_texts[0]} 二x{two_m:g} 三x{three_m:g} 四x{four_m:g} 車x{car_m:g}"
 
-    return f"{' | '.join(group_texts)} 二x{two_m:g} 三x{three_m:g} 四x{four_m:g}"
+    return f"{' | '.join(group_texts)} 二x{two_m:g} 三x{three_m:g} 四x{four_m:g} 車x{car_m:g}"
 
 
 def parse_multiplier(line, star_patterns):
@@ -272,6 +271,7 @@ def parse_line(line):
     two_multiplier, line = parse_multiplier(line, ["二", "2"])
     three_multiplier, line = parse_multiplier(line, ["三", "3"])
     four_multiplier, line = parse_multiplier(line, ["四", "4"])
+    car_multiplier, line = parse_multiplier(line, ["車"])
 
     is_cross_group = "|" in line
 
@@ -301,6 +301,7 @@ def parse_line(line):
             "two_multiplier": two_multiplier,
             "three_multiplier": three_multiplier,
             "four_multiplier": four_multiplier,
+            "car_multiplier": car_multiplier,
             "invalid_numbers": all_invalid_numbers,
             "duplicate_count": total_duplicate_count
         }
@@ -315,21 +316,24 @@ def parse_line(line):
         "two_multiplier": two_multiplier,
         "three_multiplier": three_multiplier,
         "four_multiplier": four_multiplier,
+        "car_multiplier": car_multiplier,
         "invalid_numbers": invalid_numbers,
         "duplicate_count": duplicate_count
     }
 
 
-def calculate_results(lines, price_2, price_3, price_4):
+def calculate_results(lines, price_2, price_3, price_4, price_car):
     results = []
 
     total_two_count = 0
     total_three_count = 0
     total_four_count = 0
+    total_car_count = 0
 
     total_two_cost = 0
     total_three_cost = 0
     total_four_cost = 0
+    total_car_cost = 0
 
     for index, line in enumerate(lines, start=1):
         parsed = parse_line(line)
@@ -348,25 +352,32 @@ def calculate_results(lines, price_2, price_3, price_4):
             three_base = combination(n, 3)
             four_base = combination(n, 4)
 
+        car_base = n * 38
+
         two_multiplier = parsed["two_multiplier"]
         three_multiplier = parsed["three_multiplier"]
         four_multiplier = parsed["four_multiplier"]
+        car_multiplier = parsed["car_multiplier"]
 
         two_actual = two_base * two_multiplier
         three_actual = three_base * three_multiplier
         four_actual = four_base * four_multiplier
+        car_actual = car_base * car_multiplier
 
         two_cost = two_actual * price_2
         three_cost = three_actual * price_3
         four_cost = four_actual * price_4
+        car_cost = car_actual * price_car
 
         total_two_count += two_actual
         total_three_count += three_actual
         total_four_count += four_actual
+        total_car_count += car_actual
 
         total_two_cost += two_cost
         total_three_cost += three_cost
         total_four_cost += four_cost
+        total_car_cost += car_cost
 
         results.append({
             "區塊": index,
@@ -378,16 +389,20 @@ def calculate_results(lines, price_2, price_3, price_4):
             "二星倍率": two_multiplier,
             "三星倍率": three_multiplier,
             "四星倍率": four_multiplier,
+            "車倍率": car_multiplier,
             "二星原始支數": two_base,
             "三星原始支數": three_base,
             "四星原始支數": four_base,
+            "車原始支數": car_base,
             "二星實際支數": two_actual,
             "三星實際支數": three_actual,
             "四星實際支數": four_actual,
+            "車實際支數": car_actual,
             "二星金額": two_cost,
             "三星金額": three_cost,
             "四星金額": four_cost,
-            "小計": two_cost + three_cost + four_cost,
+            "車金額": car_cost,
+            "小計": two_cost + three_cost + four_cost + car_cost,
             "重複號碼數": parsed["duplicate_count"],
             "錯誤號碼": "、".join(str(num) for num in parsed["invalid_numbers"])
         })
@@ -396,10 +411,12 @@ def calculate_results(lines, price_2, price_3, price_4):
         "total_two_count": total_two_count,
         "total_three_count": total_three_count,
         "total_four_count": total_four_count,
+        "total_car_count": total_car_count,
         "total_two_cost": total_two_cost,
         "total_three_cost": total_three_cost,
         "total_four_cost": total_four_cost,
-        "total_cost": total_two_cost + total_three_cost + total_four_cost
+        "total_car_cost": total_car_cost,
+        "total_cost": total_two_cost + total_three_cost + total_four_cost + total_car_cost
     }
 
     return results, totals
@@ -408,6 +425,13 @@ def calculate_results(lines, price_2, price_3, price_4):
 def clear_all_groups():
     for group_key in GROUP_KEYS:
         st.session_state[group_key] = []
+
+
+def reset_all_multipliers():
+    st.session_state["two_multiplier"] = 0.0
+    st.session_state["three_multiplier"] = 0.0
+    st.session_state["four_multiplier"] = 0.0
+    st.session_state["car_multiplier"] = 0.0
 
 
 def find_duplicate_in_other_groups(active_group, num):
@@ -439,15 +463,17 @@ def add_or_remove_number(group_key, num):
     st.session_state["select_warning"] = ""
 
 
+def set_multiplier(target_key, value):
+    st.session_state[target_key] = value
+
+
 def render_number_pad(group_key):
     numbers = list(range(1, 40))
 
-    # 這個 key 會讓 CSS 只套用在號碼區
     with st.container(key="number_pad_area"):
-        # 每排 10 顆
-        for row_start in range(0, 39, 5):
-            row_nums = numbers[row_start:row_start + 5]
-            cols = st.columns(5, gap="small")
+        for row_start in range(0, 39, 10):
+            row_nums = numbers[row_start:row_start + 10]
+            cols = st.columns(10, gap="small")
 
             for i, num in enumerate(row_nums):
                 selected = num in st.session_state[group_key]
@@ -465,6 +491,34 @@ def render_number_pad(group_key):
                     )
 
                     st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_multiplier_control(label, state_key):
+    value = st.number_input(
+        label,
+        min_value=0.0,
+        step=0.05,
+        format="%.2f",
+        key=state_key
+    )
+
+    q1, q2 = st.columns(2, gap="small")
+
+    for idx, quick_value in enumerate(QUICK_VALUES):
+        with (q1 if idx % 2 == 0 else q2):
+            st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+
+            st.button(
+                f"{quick_value:g}",
+                key=f"{state_key}_{quick_value}",
+                use_container_width=True,
+                on_click=set_multiplier,
+                args=(state_key, quick_value)
+            )
+
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    return value
 
 
 def manual_line_has_cross_duplicate(line):
@@ -508,6 +562,9 @@ if "three_multiplier" not in st.session_state:
 
 if "four_multiplier" not in st.session_state:
     st.session_state["four_multiplier"] = 0.0
+
+if "car_multiplier" not in st.session_state:
+    st.session_state["car_multiplier"] = 0.0
 
 for key in GROUP_KEYS:
     if key not in st.session_state:
@@ -613,85 +670,23 @@ else:
 
 
 # ===== 倍率 =====
-# ===== 倍率 =====
-
-def set_multiplier(target_key, value):
-    st.session_state[target_key] = value
-
 
 st.markdown("### 倍率")
-
 st.caption("可手動輸入，也可直接點常用倍率。")
 
-quick_values = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0]
-
-m1, m2, m3 = st.columns(3, gap="small")
+m1, m2, m3, m4 = st.columns(4, gap="small")
 
 with m1:
-    two_multiplier = st.number_input(
-        "二星",
-        min_value=0.0,
-        step=0.05,
-        format="%.2f",
-        key="two_multiplier"
-    )
-
-    cols = st.columns(2, gap="small")
-    for idx, value in enumerate(quick_values):
-        with cols[idx % 2]:
-            st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-            st.button(
-                f"{value:g}",
-                key=f"two_quick_{value}",
-                use_container_width=True,
-                on_click=set_multiplier,
-                args=("two_multiplier", value)
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
+    two_multiplier = render_multiplier_control("二星", "two_multiplier")
 
 with m2:
-    three_multiplier = st.number_input(
-        "三星",
-        min_value=0.0,
-        step=0.05,
-        format="%.2f",
-        key="three_multiplier"
-    )
-
-    cols = st.columns(2, gap="small")
-    for idx, value in enumerate(quick_values):
-        with cols[idx % 2]:
-            st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-            st.button(
-                f"{value:g}",
-                key=f"three_quick_{value}",
-                use_container_width=True,
-                on_click=set_multiplier,
-                args=("three_multiplier", value)
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
+    three_multiplier = render_multiplier_control("三星", "three_multiplier")
 
 with m3:
-    four_multiplier = st.number_input(
-        "四星",
-        min_value=0.0,
-        step=0.05,
-        format="%.2f",
-        key="four_multiplier"
-    )
+    four_multiplier = render_multiplier_control("四星", "four_multiplier")
 
-    cols = st.columns(2, gap="small")
-    for idx, value in enumerate(quick_values):
-        with cols[idx % 2]:
-            st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-            st.button(
-                f"{value:g}",
-                key=f"four_quick_{value}",
-                use_container_width=True,
-                on_click=set_multiplier,
-                args=("four_multiplier", value)
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
+with m4:
+    car_multiplier = render_multiplier_control("車", "car_multiplier")
 
 
 # ===== 加入這組 =====
@@ -706,12 +701,14 @@ if st.button("加入這組", type="primary", use_container_width=True):
         new_line = infer_line_from_groups(
             two_multiplier,
             three_multiplier,
-            four_multiplier
+            four_multiplier,
+            car_multiplier
         )
 
         st.session_state["lines"].append(new_line)
         st.session_state["calculate_clicked"] = False
         clear_all_groups()
+        reset_all_multipliers()
         st.session_state["select_warning"] = ""
 
         st.success("已加入這組")
@@ -722,7 +719,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ===== 單價設定 =====
 
 st.subheader("💰 單價")
-p1, p2, p3 = st.columns(3, gap="small")
+p1, p2, p3, p4 = st.columns(4, gap="small")
 
 with p1:
     price_2 = st.number_input("二星每支", min_value=0.0, value=72.5, step=0.5)
@@ -732,6 +729,9 @@ with p2:
 
 with p3:
     price_4 = st.number_input("四星每支", min_value=0.0, value=53.0, step=0.5)
+
+with p4:
+    price_car = st.number_input("車每支", min_value=0.0, value=1.0, step=0.5)
 
 
 # ===== 已加入組別 =====
@@ -781,6 +781,7 @@ with b2:
         st.session_state["lines"] = []
         st.session_state["calculate_clicked"] = False
         clear_all_groups()
+        reset_all_multipliers()
         st.session_state["select_warning"] = ""
         st.rerun()
 
@@ -793,7 +794,7 @@ if st.session_state["calculate_clicked"]:
     if len(lines) == 0:
         st.warning("請先加入至少一組號碼。")
     else:
-        results, totals = calculate_results(lines, price_2, price_3, price_4)
+        results, totals = calculate_results(lines, price_2, price_3, price_4, price_car)
 
         st.subheader("📊 總計")
 
@@ -803,11 +804,13 @@ if st.session_state["calculate_clicked"]:
             st.metric("二星總支數", f"{format_num(totals['total_two_count'])} 支")
             st.metric("三星總支數", f"{format_num(totals['total_three_count'])} 支")
             st.metric("四星總支數", f"{format_num(totals['total_four_count'])} 支")
+            st.metric("車總支數", f"{format_num(totals['total_car_count'])} 支")
 
         with t2:
             st.metric("二星金額", f"{format_num(totals['total_two_cost'])} 元")
             st.metric("三星金額", f"{format_num(totals['total_three_cost'])} 元")
             st.metric("四星金額", f"{format_num(totals['total_four_cost'])} 元")
+            st.metric("車金額", f"{format_num(totals['total_car_cost'])} 元")
 
         st.metric("總金額", f"{format_num(totals['total_cost'])} 元")
 
