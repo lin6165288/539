@@ -2,6 +2,7 @@ import streamlit as st
 import math
 import re
 import itertools
+import base64
 
 st.set_page_config(
     page_title="539 快速計算器",
@@ -321,15 +322,69 @@ if "calculate_clicked" not in st.session_state:
 
 
 # ===== 照片區 =====
+# ===== 照片區：手機固定上方 =====
 
-with st.expander("📷 照片參考", expanded=True):
-    uploaded_file = st.file_uploader(
-        "上傳彩券照片",
-        type=["jpg", "jpeg", "png"]
+st.subheader("📷 照片參考")
+
+uploaded_file = st.file_uploader(
+    "上傳彩券照片",
+    type=["jpg", "jpeg", "png"]
+)
+
+photo_height = st.radio(
+    "照片大小",
+    ["小", "中", "大"],
+    horizontal=True,
+    index=1
+)
+
+height_map = {
+    "小": "180px",
+    "中": "260px",
+    "大": "380px"
+}
+
+if uploaded_file is not None:
+    image_bytes = uploaded_file.getvalue()
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+    mime_type = uploaded_file.type
+
+    st.markdown(
+        f"""
+        <style>
+        .sticky-photo {{
+            position: sticky;
+            top: 0;
+            z-index: 999;
+            background: white;
+            padding: 8px 0 10px 0;
+            border-bottom: 2px solid #f97316;
+        }}
+
+        .sticky-photo img {{
+            width: 100%;
+            max-height: {height_map[photo_height]};
+            object-fit: contain;
+            border-radius: 12px;
+            border: 1px solid #ddd;
+            background: #fafafa;
+        }}
+
+        @media (max-width: 768px) {{
+            .sticky-photo {{
+                top: 0;
+            }}
+        }}
+        </style>
+
+        <div class="sticky-photo">
+            <img src="data:{mime_type};base64,{image_base64}">
+        </div>
+        """,
+        unsafe_allow_html=True
     )
-
-    if uploaded_file is not None:
-        st.image(uploaded_file, caption="已上傳的照片", use_container_width=True)
+else:
+    st.info("請先上傳照片，照片會固定在畫面上方方便對照。")
 
 
 # ===== 新增一組 =====
