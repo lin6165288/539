@@ -647,7 +647,57 @@ def calculate_redeem_result(ticket, winning_numbers):
     }
 
 
+def ticket_sort_key(ticket_name):
+    match = re.search(r"第(\d+)張", ticket_name)
+    if match:
+        return int(match.group(1))
+    return 999999
+
+
 def redeem_ticket_summary_rows():
+    """已儲存票券：同一張票的多個區塊合併顯示下注總支數。"""
+    summary = {}
+
+    for ticket in st.session_state["redeem_tickets"]:
+        name = ticket["票名"]
+
+        if name not in summary:
+            summary[name] = {
+                "票名": name,
+                "包含組數": 0,
+                "二星總支數": 0,
+                "三星總支數": 0,
+                "四星總支數": 0,
+                "車總支數": 0,
+                "號碼內容": [],
+            }
+
+        summary[name]["包含組數"] += 1
+        summary[name]["二星總支數"] += ticket["二星下注支數"]
+        summary[name]["三星總支數"] += ticket["三星下注支數"]
+        summary[name]["四星總支數"] += ticket["四星下注支數"]
+        summary[name]["車總支數"] += ticket["車下注支數"]
+        summary[name]["號碼內容"].append(ticket["原始輸入"])
+
+    rows = []
+
+    for name in sorted(summary.keys(), key=ticket_sort_key):
+        item = summary[name]
+        rows.append({
+            "票名": item["票名"],
+            "包含組數": item["包含組數"],
+            "二星總支數": item["二星總支數"],
+            "三星總支數": item["三星總支數"],
+            "四星總支數": item["四星總支數"],
+            "車總支數": item["車總支數"],
+            "號碼內容": " / ".join(item["號碼內容"]),
+        })
+
+    return rows
+
+
+def redeem_ticket_detail_rows():
+    """保留每一組明細，方便檢查。"""
     rows = []
 
     for ticket in st.session_state["redeem_tickets"]:
@@ -661,6 +711,69 @@ def redeem_ticket_summary_rows():
             "四星下注支數": ticket["四星下注支數"],
             "車下注支數": ticket["車下注支數"],
             "原始輸入": ticket["原始輸入"],
+        })
+
+    return rows
+
+
+def redeem_result_summary_by_ticket(winning_numbers):
+    """兌獎結果：同一張票合併顯示各星別下注總支數與中獎總支數。"""
+    summary = {}
+
+    for ticket in st.session_state["redeem_tickets"]:
+        name = ticket["票名"]
+        result = calculate_redeem_result(ticket, winning_numbers)
+
+        if name not in summary:
+            summary[name] = {
+                "票名": name,
+                "包含組數": 0,
+                "命中號碼集合": set(),
+                "二星總支數": 0,
+                "三星總支數": 0,
+                "四星總支數": 0,
+                "車總支數": 0,
+                "二星中獎支數": 0,
+                "三星中獎支數": 0,
+                "四星中獎支數": 0,
+                "車中獎支數": 0,
+                "總中獎支數": 0,
+            }
+
+        summary[name]["包含組數"] += 1
+
+        for num in set(ticket["numbers"]) & set(winning_numbers):
+            summary[name]["命中號碼集合"].add(num)
+
+        summary[name]["二星總支數"] += ticket["二星下注支數"]
+        summary[name]["三星總支數"] += ticket["三星下注支數"]
+        summary[name]["四星總支數"] += ticket["四星下注支數"]
+        summary[name]["車總支數"] += ticket["車下注支數"]
+
+        summary[name]["二星中獎支數"] += result["二星中獎支數"]
+        summary[name]["三星中獎支數"] += result["三星中獎支數"]
+        summary[name]["四星中獎支數"] += result["四星中獎支數"]
+        summary[name]["車中獎支數"] += result["車中獎支數"]
+        summary[name]["總中獎支數"] += result["總中獎支數"]
+
+    rows = []
+
+    for name in sorted(summary.keys(), key=ticket_sort_key):
+        item = summary[name]
+        hit_numbers = sorted(item["命中號碼集合"])
+        rows.append({
+            "票名": item["票名"],
+            "包含組數": item["包含組數"],
+            "命中號碼": "、".join(f"{num:02d}" for num in hit_numbers) if hit_numbers else "無",
+            "二星總支數": item["二星總支數"],
+            "二星中獎支數": item["二星中獎支數"],
+            "三星總支數": item["三星總支數"],
+            "三星中獎支數": item["三星中獎支數"],
+            "四星總支數": item["四星總支數"],
+            "四星中獎支數": item["四星中獎支數"],
+            "車總支數": item["車總支數"],
+            "車中獎支數": item["車中獎支數"],
+            "總中獎支數": item["總中獎支數"],
         })
 
     return rows
@@ -980,13 +1093,16 @@ if st.session_state["calculate_clicked"]:
 # ===== 兌獎區 =====
 
 st.subheader("🎁 兌獎區")
-st.caption("每按一次『開始計算』會自動存成同一張票，例如同一次有兩組號碼，兩組都會記成同一張。輸入當期 5 個開獎號碼後，會自動計算每張中了多少支。")
+st.caption("每按一次『開始計算』會自動存成同一張票；兌獎時會依照第1張、第2張分別統計二、三、四星與車的下注總支數和中獎總支數。")
 
 if len(st.session_state["redeem_tickets"]) == 0:
     st.info("目前兌獎區還沒有資料。請先按『開始計算』，系統會自動把計算內容存進來。")
 else:
-    st.markdown("#### 已儲存票券")
+    st.markdown("#### 已儲存票券總表")
     st.dataframe(redeem_ticket_summary_rows(), use_container_width=True, hide_index=True)
+
+    with st.expander("查看每一組明細", expanded=False):
+        st.dataframe(redeem_ticket_detail_rows(), use_container_width=True, hide_index=True)
 
     draw_text = st.text_input(
         "輸入當期539開獎號碼",
@@ -1011,11 +1127,13 @@ else:
                 for ticket in st.session_state["redeem_tickets"]
             ]
 
-            total_two_hit = sum(item["二星中獎支數"] for item in redeem_results)
-            total_three_hit = sum(item["三星中獎支數"] for item in redeem_results)
-            total_four_hit = sum(item["四星中獎支數"] for item in redeem_results)
-            total_car_hit = sum(item["車中獎支數"] for item in redeem_results)
-            total_all_hit = sum(item["總中獎支數"] for item in redeem_results)
+            ticket_summary_results = redeem_result_summary_by_ticket(winning_numbers)
+
+            total_two_hit = sum(item["二星中獎支數"] for item in ticket_summary_results)
+            total_three_hit = sum(item["三星中獎支數"] for item in ticket_summary_results)
+            total_four_hit = sum(item["四星中獎支數"] for item in ticket_summary_results)
+            total_car_hit = sum(item["車中獎支數"] for item in ticket_summary_results)
+            total_all_hit = sum(item["總中獎支數"] for item in ticket_summary_results)
 
             r1, r2 = st.columns(2, gap="small")
 
@@ -1029,8 +1147,11 @@ else:
 
             st.metric("全部總中獎支數", f"{format_num(total_all_hit)} 支")
 
-            st.markdown("#### 每張中獎結果")
-            st.dataframe(redeem_results, use_container_width=True, hide_index=True)
+            st.markdown("#### 每張中獎結果總表")
+            st.dataframe(ticket_summary_results, use_container_width=True, hide_index=True)
+
+            with st.expander("查看每一組中獎明細", expanded=False):
+                st.dataframe(redeem_results, use_container_width=True, hide_index=True)
 
     clear_redeem_col, _ = st.columns([1, 2], gap="small")
     with clear_redeem_col:
