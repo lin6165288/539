@@ -469,9 +469,9 @@ def render_number_pad(group_key):
     numbers = list(range(1, 40))
 
     with st.container(key="number_pad_area"):
-        for row_start in range(0, 39, 5):
-            row_nums = numbers[row_start:row_start + 5]
-            cols = st.columns(5, gap="small")
+        for row_start in range(0, 39, 10):
+            row_nums = numbers[row_start:row_start + 10]
+            cols = st.columns(10, gap="small")
 
             for i, num in enumerate(row_nums):
                 selected = num in st.session_state[group_key]
@@ -622,7 +622,8 @@ def calculate_redeem_result(ticket, winning_numbers):
         three_hit_base = combination(hit_count, 3)
         four_hit_base = combination(hit_count, 4)
 
-    car_hit_base = hit_count * 38
+    # 車的中獎支數：命中號碼數 × 車倍率 × 4
+    car_hit_base = hit_count * 4
 
     two_hit_actual = two_hit_base * ticket["二星倍率"]
     three_hit_actual = three_hit_base * ticket["三星倍率"]
@@ -1093,7 +1094,7 @@ if st.session_state["calculate_clicked"]:
 # ===== 兌獎區 =====
 
 st.subheader("🎁 兌獎區")
-st.caption("每按一次『開始計算』會自動存成同一張票；兌獎時會依照第1張、第2張分別統計二、三、四星與車的下注總支數和中獎總支數。")
+st.caption("每按一次『開始計算』會自動存成同一張票；車下注支數＝號碼數×倍率×38，車中獎支數＝命中號碼數×倍率×4。")
 
 if len(st.session_state["redeem_tickets"]) == 0:
     st.info("目前兌獎區還沒有資料。請先按『開始計算』，系統會自動把計算內容存進來。")
