@@ -16,8 +16,8 @@ st.markdown(
     <style>
     .block-container {
         padding-top: 0.25rem;
-        padding-left: 0.2rem;
-        padding-right: 0.2rem;
+        padding-left: 0rem;
+        padding-right: 0rem;
         max-width: 720px;
     }
 
@@ -122,8 +122,8 @@ st.markdown(
     }
 
     .num-btn button {
-        height: 1.75rem !important;
-        min-height: 1.75rem !important;
+        height: 1rem !important;
+        min-height: 1rem !important;
         font-size: 0.68rem !important;
         padding: 0 !important;
         border-radius: 7px !important;
