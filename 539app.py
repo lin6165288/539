@@ -42,14 +42,29 @@ def combination(n, r):
 
 
 def parse_line(line):
-    multiplier = 1.0
+    two_multiplier = 0.0
+    three_multiplier = 0.0
+    four_multiplier = 0.0
 
-    multiplier_match = re.search(r"[*xX×]\s*(\d+(\.\d+)?)", line)
+    # 找二星倍率，例如：二x0.1、2x0.1、二X1、2×1
+    two_match = re.search(r"(二|2)\s*[xX×]\s*(\d+(\.\d+)?)", line)
+    if two_match:
+        two_multiplier = float(two_match.group(2))
+        line = line.replace(two_match.group(0), "")
 
-    if multiplier_match:
-        multiplier = float(multiplier_match.group(1))
-        line = line.replace(multiplier_match.group(0), "")
+    # 找三星倍率，例如：三x1、3x1
+    three_match = re.search(r"(三|3)\s*[xX×]\s*(\d+(\.\d+)?)", line)
+    if three_match:
+        three_multiplier = float(three_match.group(2))
+        line = line.replace(three_match.group(0), "")
 
+    # 找四星倍率，例如：四x0.5、4x0.5
+    four_match = re.search(r"(四|4)\s*[xX×]\s*(\d+(\.\d+)?)", line)
+    if four_match:
+        four_multiplier = float(four_match.group(2))
+        line = line.replace(four_match.group(0), "")
+
+    # 剩下的數字才當作號碼
     number_matches = re.findall(r"\d{1,2}", line)
 
     numbers = []
@@ -68,11 +83,12 @@ def parse_line(line):
 
     return {
         "numbers": unique_numbers,
-        "multiplier": multiplier,
+        "two_multiplier": two_multiplier,
+        "three_multiplier": three_multiplier,
+        "four_multiplier": four_multiplier,
         "invalid_numbers": invalid_numbers,
         "duplicate_count": duplicate_count
     }
-
 
 if st.button("開始計算", type="primary"):
     lines = [
@@ -95,7 +111,10 @@ if st.button("開始計算", type="primary"):
         parsed = parse_line(line)
 
         numbers = parsed["numbers"]
-        multiplier = parsed["multiplier"]
+        two_multiplier = parsed["two_multiplier"]
+        three_multiplier = parsed["three_multiplier"]
+        four_multiplier = parsed["four_multiplier"]
+
 
         n = len(numbers)
 
@@ -103,9 +122,9 @@ if st.button("開始計算", type="primary"):
         three_base = combination(n, 3)
         four_base = combination(n, 4)
 
-        two_actual = two_base * multiplier
-        three_actual = three_base * multiplier
-        four_actual = four_base * multiplier
+        two_actual = two_base * two_multiplier
+        three_actual = three_base * three_multiplier
+        four_actual = four_base * four_multiplier
 
         two_cost = two_actual * price_2
         three_cost = three_actual * price_3
@@ -123,7 +142,9 @@ if st.button("開始計算", type="primary"):
             "區塊": index,
             "號碼": "、".join(f"{num:02d}" for num in numbers),
             "號碼數": n,
-            "倍率": multiplier,
+            "二星倍率": two_multiplier,
+            "三星倍率": three_multiplier,
+            "四星倍率": four_multiplier,
             "二星組數": two_actual,
             "三星組數": three_actual,
             "四星組數": four_actual,
