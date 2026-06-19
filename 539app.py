@@ -9,10 +9,78 @@ st.set_page_config(
     layout="wide"
 )
 
+# ===== 手機版樣式 =====
+st.markdown(
+    """
+    <style>
+    .block-container {
+        padding-top: 1rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+        max-width: 900px;
+    }
+
+    .stButton > button {
+        width: 100%;
+        height: 3rem;
+        font-size: 1.05rem;
+        border-radius: 12px;
+        font-weight: 600;
+    }
+
+    .stTextInput input {
+        font-size: 1.05rem;
+        height: 3rem;
+    }
+
+    .stNumberInput input {
+        font-size: 1.05rem;
+        height: 3rem;
+    }
+
+    textarea {
+        font-size: 1rem !important;
+        line-height: 1.5 !important;
+    }
+
+    div[data-testid="stMetric"] {
+        background-color: #fff7ed;
+        padding: 12px;
+        border-radius: 14px;
+        border: 1px solid #fed7aa;
+    }
+
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.9rem;
+    }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.25rem;
+    }
+
+    @media (max-width: 768px) {
+        h1 {
+            font-size: 1.55rem !important;
+        }
+
+        h2, h3 {
+            font-size: 1.15rem !important;
+        }
+
+        .stRadio > div {
+            gap: 0.5rem;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.title("🎯 539 快速計算器")
+st.caption("上傳照片當參考，手動輸入分區與倍率，系統自動計算支數與金額。")
 
-st.write("左邊上傳照片當參考，右邊輸入每一組的分區號碼與二、三、四星倍率。")
 
+# ===== 工具函式 =====
 
 def combination(n, r):
     if n < r:
@@ -49,6 +117,12 @@ def parse_numbers(text):
 def cross_group_count(groups, star):
     """
     分區交叉計算，且同一支內同號要排除。
+
+    二星：任選 2 區，各取 1 個號碼
+    三星：任選 3 區，各取 1 個號碼
+    四星：任選 4 區，各取 1 個號碼
+
+    若同一支裡出現重複號碼，該支不計算。
     """
     if len(groups) < star:
         return 0
@@ -136,130 +210,22 @@ def parse_line(line):
             "duplicate_count": total_duplicate_count
         }
 
-    else:
-        numbers, invalid_numbers, duplicate_count = parse_numbers(line)
+    numbers, invalid_numbers, duplicate_count = parse_numbers(line)
 
-        return {
-            "original_line": original_line,
-            "mode": "一般組合",
-            "groups": [],
-            "numbers": numbers,
-            "two_multiplier": two_multiplier,
-            "three_multiplier": three_multiplier,
-            "four_multiplier": four_multiplier,
-            "invalid_numbers": invalid_numbers,
-            "duplicate_count": duplicate_count
-        }
-
-
-if "lines" not in st.session_state:
-    st.session_state["lines"] = []
-
-left_col, right_col = st.columns([1.1, 1])
-
-with left_col:
-    st.subheader("照片參考")
-
-    uploaded_file = st.file_uploader(
-        "上傳彩券照片",
-        type=["jpg", "jpeg", "png"]
-    )
-
-    if uploaded_file is not None:
-        st.image(uploaded_file, caption="已上傳的照片", use_container_width=True)
-
-with right_col:
-    st.subheader("新增一組")
-
-    mode = st.radio(
-        "計算模式",
-        ["一般組合", "分區交叉"],
-        horizontal=True
-    )
-
-    st.caption("一般組合：全部號碼一起 C(n,2)、C(n,3)、C(n,4)。分區交叉：A區 × B區 × C區，且同號自動排除。")
-
-    a_group = st.text_input("A區號碼", placeholder="例如：02 18 36 06")
-    b_group = st.text_input("B區號碼", placeholder="例如：03 04 07 31")
-    c_group = st.text_input("C區號碼", placeholder="例如：13 24 27 37 29")
-    d_group = st.text_input("D區號碼", placeholder="可空白")
-
-    m1, m2, m3 = st.columns(3)
-
-    with m1:
-        two_multiplier = st.number_input("二星倍率", min_value=0.0, value=0.0, step=0.1)
-
-    with m2:
-        three_multiplier = st.number_input("三星倍率", min_value=0.0, value=0.0, step=0.1)
-
-    with m3:
-        four_multiplier = st.number_input("四星倍率", min_value=0.0, value=0.0, step=0.1)
-
-    if st.button("加入這組", type="primary"):
-        new_line = line_from_form(
-            a_group,
-            b_group,
-            c_group,
-            d_group,
-            two_multiplier,
-            three_multiplier,
-            four_multiplier,
-            mode
-        )
-
-        if not a_group.strip():
-            st.warning("至少要輸入 A區號碼。")
-        else:
-            st.session_state["lines"].append(new_line)
-            st.success("已加入這組。")
+    return {
+        "original_line": original_line,
+        "mode": "一般組合",
+        "groups": [],
+        "numbers": numbers,
+        "two_multiplier": two_multiplier,
+        "three_multiplier": three_multiplier,
+        "four_multiplier": four_multiplier,
+        "invalid_numbers": invalid_numbers,
+        "duplicate_count": duplicate_count
+    }
 
 
-st.divider()
-
-st.subheader("單價設定")
-
-p1, p2, p3 = st.columns(3)
-
-with p1:
-    price_2 = st.number_input("二星每支金額", min_value=0.0, value=10.0, step=1.0)
-
-with p2:
-    price_3 = st.number_input("三星每支金額", min_value=0.0, value=10.0, step=1.0)
-
-with p3:
-    price_4 = st.number_input("四星每支金額", min_value=0.0, value=10.0, step=1.0)
-
-
-st.subheader("目前已加入的組別")
-
-current_text = "\n".join(st.session_state["lines"])
-
-edited_text = st.text_area(
-    "你也可以在這裡直接修改",
-    value=current_text,
-    height=260
-)
-
-st.session_state["lines"] = [
-    line.strip()
-    for line in edited_text.split("\n")
-    if line.strip()
-]
-
-btn_col1, btn_col2 = st.columns([1, 1])
-
-with btn_col1:
-    calculate_clicked = st.button("開始計算", type="primary")
-
-with btn_col2:
-    if st.button("清空全部"):
-        st.session_state["lines"] = []
-        st.rerun()
-
-
-if calculate_clicked:
-    lines = st.session_state["lines"]
-
+def calculate_results(lines, price_2, price_3, price_4):
     results = []
 
     total_two_count = 0
@@ -332,34 +298,218 @@ if calculate_clicked:
             "錯誤號碼": "、".join(str(num) for num in parsed["invalid_numbers"])
         })
 
-    total_cost = total_two_cost + total_three_cost + total_four_cost
+    totals = {
+        "total_two_count": total_two_count,
+        "total_three_count": total_three_count,
+        "total_four_count": total_four_count,
+        "total_two_cost": total_two_cost,
+        "total_three_cost": total_three_cost,
+        "total_four_cost": total_four_cost,
+        "total_cost": total_two_cost + total_three_cost + total_four_cost
+    }
 
-    st.subheader("總計")
+    return results, totals
 
-    c1, c2, c3, c4 = st.columns(4)
 
-    with c1:
-        st.metric("二星總支數", f"{format_num(total_two_count)} 支")
-        st.metric("二星金額", f"{format_num(total_two_cost)} 元")
+# ===== Session State =====
 
-    with c2:
-        st.metric("三星總支數", f"{format_num(total_three_count)} 支")
-        st.metric("三星金額", f"{format_num(total_three_cost)} 元")
+if "lines" not in st.session_state:
+    st.session_state["lines"] = []
 
-    with c3:
-        st.metric("四星總支數", f"{format_num(total_four_count)} 支")
-        st.metric("四星金額", f"{format_num(total_four_cost)} 元")
+if "calculate_clicked" not in st.session_state:
+    st.session_state["calculate_clicked"] = False
 
-    with c4:
-        st.metric("總金額", f"{format_num(total_cost)} 元")
 
-    st.subheader("詳細結果")
-    st.dataframe(results, use_container_width=True)
+# ===== 照片區 =====
 
-    warning_items = [
-        item for item in results
-        if item["重複號碼數"] > 0 or item["錯誤號碼"]
-    ]
+with st.expander("📷 照片參考", expanded=True):
+    uploaded_file = st.file_uploader(
+        "上傳彩券照片",
+        type=["jpg", "jpeg", "png"]
+    )
 
-    if warning_items:
-        st.warning("有些區塊出現重複號碼或錯誤號碼，請檢查詳細結果。")
+    if uploaded_file is not None:
+        st.image(uploaded_file, caption="已上傳的照片", use_container_width=True)
+
+
+# ===== 新增一組 =====
+
+st.subheader("➕ 新增一組")
+
+with st.form("add_group_form", clear_on_submit=True):
+    mode = st.radio(
+        "計算模式",
+        ["一般組合", "分區交叉"],
+        horizontal=True
+    )
+
+    st.caption("一般組合：全部號碼一起算。分區交叉：A區 × B區 × C區，且同號自動排除。")
+
+    a_group = st.text_input("A區號碼", placeholder="例如：02 18 36 06")
+    b_group = st.text_input("B區號碼", placeholder="例如：03 04 07 31")
+    c_group = st.text_input("C區號碼", placeholder="例如：13 24 27 37 29")
+    d_group = st.text_input("D區號碼", placeholder="可空白")
+
+    m1, m2, m3 = st.columns(3)
+
+    with m1:
+        two_multiplier = st.number_input(
+            "二星",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            format="%.1f"
+        )
+
+    with m2:
+        three_multiplier = st.number_input(
+            "三星",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            format="%.1f"
+        )
+
+    with m3:
+        four_multiplier = st.number_input(
+            "四星",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            format="%.1f"
+        )
+
+    submitted = st.form_submit_button("加入這組")
+
+    if submitted:
+        if not a_group.strip():
+            st.warning("至少要輸入 A區號碼。")
+        else:
+            new_line = line_from_form(
+                a_group,
+                b_group,
+                c_group,
+                d_group,
+                two_multiplier,
+                three_multiplier,
+                four_multiplier,
+                mode
+            )
+
+            st.session_state["lines"].append(new_line)
+            st.session_state["calculate_clicked"] = False
+            st.success("已加入這組。")
+
+
+# ===== 單價設定 =====
+
+st.divider()
+st.subheader("💰 單價設定")
+
+p1, p2, p3 = st.columns(3)
+
+with p1:
+    price_2 = st.number_input(
+        "二星每支金額",
+        min_value=0.0,
+        value=10.0,
+        step=1.0
+    )
+
+with p2:
+    price_3 = st.number_input(
+        "三星每支金額",
+        min_value=0.0,
+        value=10.0,
+        step=1.0
+    )
+
+with p3:
+    price_4 = st.number_input(
+        "四星每支金額",
+        min_value=0.0,
+        value=10.0,
+        step=1.0
+    )
+
+
+# ===== 已加入組別 =====
+
+st.divider()
+st.subheader("📝 目前已加入的組別")
+
+if len(st.session_state["lines"]) == 0:
+    st.info("目前還沒有加入任何組別。")
+else:
+    st.caption("可以直接在下面修改文字。分區交叉用 | 分隔。")
+
+current_text = "\n".join(st.session_state["lines"])
+
+edited_text = st.text_area(
+    "組別清單",
+    value=current_text,
+    height=240,
+    placeholder="加入的組別會出現在這裡"
+)
+
+st.session_state["lines"] = [
+    line.strip()
+    for line in edited_text.split("\n")
+    if line.strip()
+]
+
+btn_col1, btn_col2 = st.columns(2)
+
+with btn_col1:
+    if st.button("開始計算", type="primary"):
+        st.session_state["calculate_clicked"] = True
+
+with btn_col2:
+    if st.button("清空全部"):
+        st.session_state["lines"] = []
+        st.session_state["calculate_clicked"] = False
+        st.rerun()
+
+
+# ===== 計算結果 =====
+
+if st.session_state["calculate_clicked"]:
+    lines = st.session_state["lines"]
+
+    if len(lines) == 0:
+        st.warning("請先加入至少一組號碼。")
+    else:
+        results, totals = calculate_results(lines, price_2, price_3, price_4)
+
+        st.divider()
+        st.subheader("📊 總計")
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.metric("二星總支數", f"{format_num(totals['total_two_count'])} 支")
+            st.metric("三星總支數", f"{format_num(totals['total_three_count'])} 支")
+            st.metric("四星總支數", f"{format_num(totals['total_four_count'])} 支")
+
+        with c2:
+            st.metric("二星金額", f"{format_num(totals['total_two_cost'])} 元")
+            st.metric("三星金額", f"{format_num(totals['total_three_cost'])} 元")
+            st.metric("四星金額", f"{format_num(totals['total_four_cost'])} 元")
+
+        st.metric("總金額", f"{format_num(totals['total_cost'])} 元")
+
+        st.subheader("📋 詳細結果")
+
+        st.dataframe(
+            results,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        warning_items = [
+            item for item in results
+            if item["重複號碼數"] > 0 or item["錯誤號碼"]
+        ]
+
+        if warning_items:
+            st.warning("有些區塊出現重複號碼或錯誤號碼，請檢查詳細結果。")
