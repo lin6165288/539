@@ -469,9 +469,9 @@ def render_number_pad(group_key):
     numbers = list(range(1, 40))
 
     with st.container(key="number_pad_area"):
-        for row_start in range(0, 39, 10):
-            row_nums = numbers[row_start:row_start + 10]
-            cols = st.columns(10, gap="small")
+        for row_start in range(0, 39, 5):
+            row_nums = numbers[row_start:row_start + 5]
+            cols = st.columns(5, gap="small")
 
             for i, num in enumerate(row_nums):
                 selected = num in st.session_state[group_key]
