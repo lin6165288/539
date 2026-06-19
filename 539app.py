@@ -1,6 +1,9 @@
 import streamlit as st
 import math
 import re
+import base64
+import json
+from openai import OpenAI
 
 st.set_page_config(
     page_title="539 快速計算器",
@@ -16,12 +19,70 @@ st.write(
 )
 
 uploaded_file = st.file_uploader(
-    "上傳彩券照片（目前先顯示照片，之後再加 AI 辨識）",
+    "上傳彩券照片",
     type=["jpg", "jpeg", "png"]
 )
 
+ai_text = ""
+
 if uploaded_file is not None:
     st.image(uploaded_file, caption="已上傳的照片", use_container_width=True)
+
+    if st.button("AI 辨識照片"):
+        with st.spinner("AI 正在辨識照片，請稍等..."):
+            image_bytes = uploaded_file.getvalue()
+            image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+            client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+            prompt = """
+你是一個彩券539手寫單辨識助手。
+
+請從圖片中辨識每一組號碼與下注倍率，並整理成「每行一組」的文字格式。
+
+重要規則：
+1. 只辨識 01 到 39 的號碼。
+2. 每一組號碼下方或旁邊會有二星、三星、四星倍率。
+3. 倍率可能寫成：
+   - 二x1、三x0.1、四x0.5
+   - 2x1、3x0.1、4x0.5
+   - 二×1、三×0.1、四×0.5
+4. 如果某一星沒有看到倍率，請填 0。
+5. 請輸出純文字，不要解釋。
+6. 每一行格式必須是：
+   號碼們 二x倍率 三x倍率 四x倍率
+7. 號碼請用兩位數格式，例如 1 要寫成 01。
+8. 不確定的號碼請用 ? 表示，例如 ?7，不要亂猜。
+9. 不要輸出 JSON。
+
+範例輸出：
+01 02 03 11 16 32 35 38 二x0.1 三x0 四x0
+02 18 36 06 03 04 07 31 二x1 三x0 四x0
+05 14 27 06 19 26 38 二x0.5 三x0.1 四x0
+"""
+
+            response = client.responses.create(
+                model="gpt-5.5",
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": prompt
+                            },
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/jpeg;base64,{image_base64}"
+                            }
+                        ]
+                    }
+                ]
+            )
+
+            ai_text = response.output_text.strip()
+            st.session_state["input_text"] = ai_text
+            st.success("辨識完成，請檢查下面的號碼是否正確。")
 
 col1, col2, col3 = st.columns(3)
 
@@ -40,9 +101,12 @@ default_text = """01 02 03 11 16 32 35 38 二x0.1 三x0 四x0
 05 14 27 06 19 26 38 二x0.5 三x0.1 四x0
 01 19 二x4 三x0 四x0"""
 
+if "input_text" not in st.session_state:
+    st.session_state["input_text"] = default_text
+
 input_text = st.text_area(
-    "輸入號碼",
-    value=default_text,
+    "輸入號碼 / AI 辨識結果",
+    key="input_text",
     height=260
 )
 
