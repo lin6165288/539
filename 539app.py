@@ -11,7 +11,6 @@ st.set_page_config(
 )
 
 # ===== 緊湊手機版樣式 =====
-# ===== 緊湊手機版樣式 =====
 st.markdown(
     """
     <style>
@@ -167,10 +166,13 @@ st.markdown(
 )
 
 st.title("🎯 539 快速計算器")
-st.caption("照片參考＋快速選號＋自動計算")
+st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉。")
 
 
 # ===== 工具函式 =====
+
+GROUP_KEYS = ["A區", "B區", "C區", "D區", "E區", "F區", "G區", "H區"]
+
 
 def combination(n, r):
     if n < r:
@@ -204,6 +206,10 @@ def parse_numbers(text):
 
 
 def cross_group_count(groups, star):
+    """
+    分區交叉計算。
+    因為輸入階段已禁止跨區重複號，這裡仍保留同號排除保護。
+    """
     if len(groups) < star:
         return 0
 
@@ -228,15 +234,24 @@ def selected_to_text(nums):
     return " ".join(f"{num:02d}" for num in sorted(nums))
 
 
-def line_from_form(a, b, c, d, two_m, three_m, four_m, mode):
-    groups_raw = [a.strip(), b.strip(), c.strip(), d.strip()]
-    groups_raw = [g for g in groups_raw if g]
+def get_filled_group_texts():
+    group_texts = []
 
-    if mode == "一般組合":
-        all_text = " ".join(groups_raw)
-        return f"{all_text} 二x{two_m:g} 三x{three_m:g} 四x{four_m:g}"
+    for group_key in GROUP_KEYS:
+        text = selected_to_text(st.session_state[group_key])
+        if text:
+            group_texts.append(text)
 
-    return f"{' | '.join(groups_raw)} 二x{two_m:g} 三x{three_m:g} 四x{four_m:g}"
+    return group_texts
+
+
+def infer_line_from_groups(two_m, three_m, four_m):
+    group_texts = get_filled_group_texts()
+
+    if len(group_texts) == 1:
+        return f"{group_texts[0]} 二x{two_m:g} 三x{three_m:g} 四x{four_m:g}"
+
+    return f"{' | '.join(group_texts)} 二x{two_m:g} 三x{three_m:g} 四x{four_m:g}"
 
 
 def parse_multiplier(line, star_patterns):
@@ -390,11 +405,38 @@ def calculate_results(lines, price_2, price_3, price_4):
     return results, totals
 
 
+def clear_all_groups():
+    for group_key in GROUP_KEYS:
+        st.session_state[group_key] = []
+
+
+def find_duplicate_in_other_groups(active_group, num):
+    for group_key in GROUP_KEYS:
+        if group_key == active_group:
+            continue
+
+        if num in st.session_state[group_key]:
+            return group_key
+
+    return None
+
+
 def add_or_remove_number(group_key, num):
     if num in st.session_state[group_key]:
         st.session_state[group_key].remove(num)
-    else:
-        st.session_state[group_key].append(num)
+        st.session_state["select_warning"] = ""
+        return
+
+    duplicate_group = find_duplicate_in_other_groups(group_key, num)
+
+    if duplicate_group:
+        st.session_state["select_warning"] = (
+            f"⚠️ {num:02d} 已經在 {duplicate_group}，不能再加入 {group_key}。"
+        )
+        return
+
+    st.session_state[group_key].append(num)
+    st.session_state["select_warning"] = ""
 
 
 def render_number_pad(group_key):
@@ -414,11 +456,34 @@ def render_number_pad(group_key):
                 with cols[i]:
                     st.markdown('<div class="num-btn">', unsafe_allow_html=True)
 
-                    if st.button(label, key=f"{group_key}_{num}", use_container_width=True):
-                        add_or_remove_number(group_key, num)
-                        st.rerun()
+                    st.button(
+                        label,
+                        key=f"{group_key}_{num}",
+                        use_container_width=True,
+                        on_click=add_or_remove_number,
+                        args=(group_key, num)
+                    )
 
                     st.markdown('</div>', unsafe_allow_html=True)
+
+
+def manual_line_has_cross_duplicate(line):
+    parsed = parse_line(line)
+
+    if parsed["mode"] != "分區交叉":
+        return []
+
+    seen = {}
+    duplicates = []
+
+    for group_index, group in enumerate(parsed["groups"], start=1):
+        for num in group:
+            if num in seen:
+                duplicates.append((num, seen[num], group_index))
+            else:
+                seen[num] = group_index
+
+    return duplicates
 
 
 # ===== Session State =====
@@ -432,7 +497,10 @@ if "calculate_clicked" not in st.session_state:
 if "active_group" not in st.session_state:
     st.session_state["active_group"] = "A區"
 
-for key in ["A區", "B區", "C區", "D區"]:
+if "select_warning" not in st.session_state:
+    st.session_state["select_warning"] = ""
+
+for key in GROUP_KEYS:
     if key not in st.session_state:
         st.session_state[key] = []
 
@@ -449,7 +517,7 @@ with st.expander("📷 照片參考", expanded=False):
     if uploaded_file is not None:
         photo_size = st.radio(
             "照片大小",
-            ["小", "中", "大"],
+            ["小", "中", "大", "特大", "超大"],
             horizontal=True,
             index=0,
             label_visibility="collapsed"
@@ -457,8 +525,10 @@ with st.expander("📷 照片參考", expanded=False):
 
         height_map = {
             "小": "120px",
-            "中": "180px",
-            "大": "260px"
+            "中": "200px",
+            "大": "320px",
+            "特大": "520px",
+            "超大": "760px"
         }
 
         image_bytes = uploaded_file.getvalue()
@@ -479,37 +549,30 @@ with st.expander("📷 照片參考", expanded=False):
 
 st.subheader("➕ 新增一組")
 
-top1, top2 = st.columns(2, gap="small")
+active_group = st.radio(
+    "編輯區",
+    GROUP_KEYS,
+    horizontal=True,
+    key="active_group"
+)
 
-with top1:
-    mode = st.radio(
-        "模式",
-        ["一般組合", "分區交叉"],
-        horizontal=True
-    )
-
-with top2:
-    active_group = st.radio(
-        "編輯區",
-        ["A區", "B區", "C區", "D區"],
-        horizontal=True,
-        key="active_group"
-    )
-
-st.caption("點號碼可選取 / 再點一次可取消")
+st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉。不同區不可重複同一號碼。")
 
 st.markdown("### 快速選號")
 render_number_pad(active_group)
+
+if st.session_state["select_warning"]:
+    st.warning(st.session_state["select_warning"])
 
 
 # ===== 已選號碼 =====
 
 st.markdown("### 已選號碼")
 
-s1, s2 = st.columns(2, gap="small")
+row1_col1, row1_col2 = st.columns(2, gap="small")
 
-with s1:
-    for group_name in ["A區", "B區"]:
+with row1_col1:
+    for group_name in ["A區", "B區", "C區", "D區"]:
         text = selected_to_text(st.session_state[group_name])
         if not text:
             text = "尚未選擇"
@@ -523,8 +586,8 @@ with s1:
             unsafe_allow_html=True
         )
 
-with s2:
-    for group_name in ["C區", "D區"]:
+with row1_col2:
+    for group_name in ["E區", "F區", "G區", "H區"]:
         text = selected_to_text(st.session_state[group_name])
         if not text:
             text = "尚未選擇"
@@ -538,35 +601,27 @@ with s2:
             unsafe_allow_html=True
         )
 
-c1, c2, c3, c4 = st.columns(4, gap="small")
+clear_cols = st.columns(4, gap="small")
 
-with c1:
-    st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-    if st.button("清A", use_container_width=True):
-        st.session_state["A區"] = []
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+for idx, group_name in enumerate(["A區", "B區", "C區", "D區"]):
+    with clear_cols[idx]:
+        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+        if st.button(f"清{group_name[0]}", use_container_width=True):
+            st.session_state[group_name] = []
+            st.session_state["select_warning"] = ""
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-with c2:
-    st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-    if st.button("清B", use_container_width=True):
-        st.session_state["B區"] = []
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+clear_cols_2 = st.columns(4, gap="small")
 
-with c3:
-    st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-    if st.button("清C", use_container_width=True):
-        st.session_state["C區"] = []
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-with c4:
-    st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-    if st.button("清D", use_container_width=True):
-        st.session_state["D區"] = []
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+for idx, group_name in enumerate(["E區", "F區", "G區", "H區"]):
+    with clear_cols_2[idx]:
+        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+        if st.button(f"清{group_name[0]}", use_container_width=True):
+            st.session_state[group_name] = []
+            st.session_state["select_warning"] = ""
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ===== 倍率 =====
@@ -586,33 +641,23 @@ with m3:
 
 # ===== 加入這組 =====
 
-a_group = selected_to_text(st.session_state["A區"])
-b_group = selected_to_text(st.session_state["B區"])
-c_group = selected_to_text(st.session_state["C區"])
-d_group = selected_to_text(st.session_state["D區"])
+filled_group_texts = get_filled_group_texts()
 
 st.markdown('<div class="main-btn">', unsafe_allow_html=True)
 if st.button("加入這組", type="primary", use_container_width=True):
-    if not a_group:
-        st.warning("至少要選擇 A區號碼。")
+    if len(filled_group_texts) == 0:
+        st.warning("至少要選擇一個區的號碼。")
     else:
-        new_line = line_from_form(
-            a_group,
-            b_group,
-            c_group,
-            d_group,
+        new_line = infer_line_from_groups(
             two_multiplier,
             three_multiplier,
-            four_multiplier,
-            mode
+            four_multiplier
         )
 
         st.session_state["lines"].append(new_line)
         st.session_state["calculate_clicked"] = False
-        st.session_state["A區"] = []
-        st.session_state["B區"] = []
-        st.session_state["C區"] = []
-        st.session_state["D區"] = []
+        clear_all_groups()
+        st.session_state["select_warning"] = ""
 
         st.success("已加入這組")
         st.rerun()
@@ -625,13 +670,13 @@ st.subheader("💰 單價")
 p1, p2, p3 = st.columns(3, gap="small")
 
 with p1:
-    price_2 = st.number_input("二星每支", min_value=0.0, value=10.0, step=1.0)
+    price_2 = st.number_input("二星每支", min_value=0.0, value=72.5, step=0.5)
 
 with p2:
-    price_3 = st.number_input("三星每支", min_value=0.0, value=10.0, step=1.0)
+    price_3 = st.number_input("三星每支", min_value=0.0, value=63.5, step=0.5)
 
 with p3:
-    price_4 = st.number_input("四星每支", min_value=0.0, value=10.0, step=1.0)
+    price_4 = st.number_input("四星每支", min_value=0.0, value=53.0, step=0.5)
 
 
 # ===== 已加入組別 =====
@@ -658,16 +703,30 @@ b1, b2 = st.columns(2, gap="small")
 
 with b1:
     if st.button("開始計算", type="primary", use_container_width=True):
-        st.session_state["calculate_clicked"] = True
+        manual_errors = []
+
+        for line_index, line in enumerate(st.session_state["lines"], start=1):
+            duplicates = manual_line_has_cross_duplicate(line)
+
+            for num, first_group, second_group in duplicates:
+                manual_errors.append(
+                    f"第 {line_index} 組：{num:02d} 同時出現在第 {first_group} 區與第 {second_group} 區。"
+                )
+
+        if manual_errors:
+            st.session_state["calculate_clicked"] = False
+            st.error("有跨區重複號碼，請先修正：")
+            for error in manual_errors:
+                st.write(error)
+        else:
+            st.session_state["calculate_clicked"] = True
 
 with b2:
     if st.button("清空全部", use_container_width=True):
         st.session_state["lines"] = []
         st.session_state["calculate_clicked"] = False
-        st.session_state["A區"] = []
-        st.session_state["B區"] = []
-        st.session_state["C區"] = []
-        st.session_state["D區"] = []
+        clear_all_groups()
+        st.session_state["select_warning"] = ""
         st.rerun()
 
 
