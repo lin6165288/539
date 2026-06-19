@@ -107,10 +107,13 @@ def parse_numbers(text):
 
 def cross_group_count(groups, star):
     """
-    分區交叉計算：
-    二星：任選 2 區，各取 1 個號碼，相乘後加總
-    三星：任選 3 區，各取 1 個號碼，相乘後加總
-    四星：任選 4 區，各取 1 個號碼，相乘後加總
+    分區交叉計算，且同一支內同號要排除。
+
+    二星：任選 2 區，各取 1 個號碼
+    三星：任選 3 區，各取 1 個號碼
+    四星：任選 4 區，各取 1 個號碼
+
+    若同一支裡出現重複號碼，該支不計算。
     """
     if len(groups) < star:
         return 0
@@ -118,12 +121,9 @@ def cross_group_count(groups, star):
     total = 0
 
     for selected_groups in itertools.combinations(groups, star):
-        count = 1
-
-        for group in selected_groups:
-            count *= len(group)
-
-        total += count
+        for ticket in itertools.product(*selected_groups):
+            if len(ticket) == len(set(ticket)):
+                total += 1
 
     return total
 
