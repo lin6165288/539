@@ -11,13 +11,14 @@ st.set_page_config(
 )
 
 # ===== 緊湊手機版樣式 =====
+# ===== 緊湊手機版樣式 =====
 st.markdown(
     """
     <style>
     .block-container {
         padding-top: 0.25rem;
-        padding-left: 0rem;
-        padding-right: 0rem;
+        padding-left: 0.45rem;
+        padding-right: 0.45rem;
         max-width: 720px;
     }
 
@@ -106,45 +107,59 @@ st.markdown(
         background: #fafafa;
     }
 
-    /* 強制 Streamlit columns 在手機不要直排 */
-    div[data-testid="stHorizontalBlock"] {
+    /* 只壓縮號碼選號區，不影響其他按鈕 */
+    .st-key-number_pad_area div[data-testid="stVerticalBlock"] {
+        gap: 0.05rem !important;
+    }
+
+    .st-key-number_pad_area div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
         gap: 0.04rem !important;
     }
-    
-    /* 壓縮欄位左右空白 */
-    div[data-testid="column"] {
+
+    .st-key-number_pad_area div[data-testid="column"] {
         min-width: 0 !important;
         flex: 1 1 0 !important;
         padding-left: 0rem !important;
         padding-right: 0rem !important;
     }
-    
-    /* 關鍵：壓縮每一排 columns 之間的上下空白 */
-    div[data-testid="stVerticalBlock"] {
-        gap: 0.12rem !important;
-    }
-    
-    /* 關鍵：壓縮 Streamlit 每個元素外層的預設空白 */
-    div[data-testid="stElementContainer"] {
+
+    .st-key-number_pad_area div[data-testid="stElementContainer"] {
         margin-bottom: 0rem !important;
     }
-    
-    /* 數字按鈕外層 */
-    .num-btn {
-        margin-top: -0.15rem !important;
-        margin-bottom: -0.15rem !important;
+
+    .st-key-number_pad_area .num-btn {
+        margin-top: -0.22rem !important;
+        margin-bottom: -0.22rem !important;
     }
-    
-    /* 數字按鈕本體 */
-    .num-btn button {
+
+    .st-key-number_pad_area .num-btn button {
         height: 1.55rem !important;
         min-height: 1.55rem !important;
         font-size: 0.66rem !important;
         padding: 0 !important;
         border-radius: 6px !important;
+    }
+
+    @media (max-width: 390px) {
+        .block-container {
+            padding-left: 0.35rem;
+            padding-right: 0.35rem;
+        }
+
+        .st-key-number_pad_area .num-btn {
+            margin-top: -0.28rem !important;
+            margin-bottom: -0.28rem !important;
+        }
+
+        .st-key-number_pad_area .num-btn button {
+            height: 1.45rem !important;
+            min-height: 1.45rem !important;
+            font-size: 0.6rem !important;
+            border-radius: 5px !important;
+        }
     }
     </style>
     """,
@@ -385,23 +400,25 @@ def add_or_remove_number(group_key, num):
 def render_number_pad(group_key):
     numbers = list(range(1, 40))
 
-    # 每排 6 顆，手機比較緊湊
-    for row_start in range(0, 39, 10):
-        row_nums = numbers[row_start:row_start + 10]
-        cols = st.columns(10, gap="small")
+    # 這個 key 會讓 CSS 只套用在號碼區
+    with st.container(key="number_pad_area"):
+        # 每排 10 顆
+        for row_start in range(0, 39, 10):
+            row_nums = numbers[row_start:row_start + 10]
+            cols = st.columns(10, gap="small")
 
-        for i, num in enumerate(row_nums):
-            selected = num in st.session_state[group_key]
-            label = f"✓{num:02d}" if selected else f"{num:02d}"
+            for i, num in enumerate(row_nums):
+                selected = num in st.session_state[group_key]
+                label = f"✓{num:02d}" if selected else f"{num:02d}"
 
-            with cols[i]:
-                st.markdown('<div class="num-btn">', unsafe_allow_html=True)
+                with cols[i]:
+                    st.markdown('<div class="num-btn">', unsafe_allow_html=True)
 
-                if st.button(label, key=f"{group_key}_{num}", use_container_width=True):
-                    add_or_remove_number(group_key, num)
-                    st.rerun()
+                    if st.button(label, key=f"{group_key}_{num}", use_container_width=True):
+                        add_or_remove_number(group_key, num)
+                        st.rerun()
 
-                st.markdown('</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ===== Session State =====
