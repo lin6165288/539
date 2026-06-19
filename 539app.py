@@ -538,6 +538,117 @@ def manual_line_has_cross_duplicate(line):
     return duplicates
 
 
+def cross_group_hit_count(groups, star, winning_set):
+    """分區交叉兌獎：選 star 個區，每區取 1 號，全部落在開獎號碼內才算中。"""
+    if len(groups) < star:
+        return 0
+
+    total = 0
+
+    for selected_groups in itertools.combinations(groups, star):
+        for ticket in itertools.product(*selected_groups):
+            if len(ticket) == len(set(ticket)) and all(num in winning_set for num in ticket):
+                total += 1
+
+    return total
+
+
+def build_redeem_ticket(ticket_name, line, result_row):
+    parsed = parse_line(line)
+
+    return {
+        "票名": ticket_name,
+        "原始輸入": line,
+        "模式": parsed["mode"],
+        "groups": parsed["groups"],
+        "numbers": parsed["numbers"],
+        "二星倍率": parsed["two_multiplier"],
+        "三星倍率": parsed["three_multiplier"],
+        "四星倍率": parsed["four_multiplier"],
+        "車倍率": parsed["car_multiplier"],
+        "二星下注支數": result_row["二星實際支數"],
+        "三星下注支數": result_row["三星實際支數"],
+        "四星下注支數": result_row["四星實際支數"],
+        "車下注支數": result_row["車實際支數"],
+        "分區顯示": group_display(parsed["groups"]),
+        "號碼顯示": "、".join(f"{num:02d}" for num in parsed["numbers"]),
+    }
+
+
+def save_current_calculation_to_redeem(lines, price_2, price_3, price_4, price_car):
+    results, _ = calculate_results(lines, price_2, price_3, price_4, price_car)
+
+    start_no = len(st.session_state["redeem_tickets"]) + 1
+
+    for index, line in enumerate(lines):
+        ticket_name = f"第{start_no + index}張"
+        ticket = build_redeem_ticket(ticket_name, line, results[index])
+        st.session_state["redeem_tickets"].append(ticket)
+
+
+def parse_winning_numbers(text):
+    numbers, invalid_numbers, duplicate_count = parse_numbers(text)
+    return numbers, invalid_numbers, duplicate_count
+
+
+def calculate_redeem_result(ticket, winning_numbers):
+    winning_set = set(winning_numbers)
+    hit_numbers = sorted(set(ticket["numbers"]) & winning_set)
+    hit_count = len(hit_numbers)
+
+    if ticket["模式"] == "分區交叉":
+        two_hit_base = cross_group_hit_count(ticket["groups"], 2, winning_set)
+        three_hit_base = cross_group_hit_count(ticket["groups"], 3, winning_set)
+        four_hit_base = cross_group_hit_count(ticket["groups"], 4, winning_set)
+    else:
+        two_hit_base = combination(hit_count, 2)
+        three_hit_base = combination(hit_count, 3)
+        four_hit_base = combination(hit_count, 4)
+
+    car_hit_base = hit_count * 38
+
+    two_hit_actual = two_hit_base * ticket["二星倍率"]
+    three_hit_actual = three_hit_base * ticket["三星倍率"]
+    four_hit_actual = four_hit_base * ticket["四星倍率"]
+    car_hit_actual = car_hit_base * ticket["車倍率"]
+
+    return {
+        "票名": ticket["票名"],
+        "模式": ticket["模式"],
+        "命中號碼": "、".join(f"{num:02d}" for num in hit_numbers) if hit_numbers else "無",
+        "命中號碼數": hit_count,
+        "二星中獎支數": two_hit_actual,
+        "三星中獎支數": three_hit_actual,
+        "四星中獎支數": four_hit_actual,
+        "車中獎支數": car_hit_actual,
+        "總中獎支數": two_hit_actual + three_hit_actual + four_hit_actual + car_hit_actual,
+        "二星下注支數": ticket["二星下注支數"],
+        "三星下注支數": ticket["三星下注支數"],
+        "四星下注支數": ticket["四星下注支數"],
+        "車下注支數": ticket["車下注支數"],
+        "原始輸入": ticket["原始輸入"],
+    }
+
+
+def redeem_ticket_summary_rows():
+    rows = []
+
+    for ticket in st.session_state["redeem_tickets"]:
+        rows.append({
+            "票名": ticket["票名"],
+            "模式": ticket["模式"],
+            "分區": ticket["分區顯示"],
+            "號碼": ticket["號碼顯示"],
+            "二星下注支數": ticket["二星下注支數"],
+            "三星下注支數": ticket["三星下注支數"],
+            "四星下注支數": ticket["四星下注支數"],
+            "車下注支數": ticket["車下注支數"],
+            "原始輸入": ticket["原始輸入"],
+        })
+
+    return rows
+
+
 # ===== Session State =====
 
 if "lines" not in st.session_state:
@@ -566,6 +677,9 @@ if "car_multiplier" not in st.session_state:
 
 if "need_reset_multipliers" not in st.session_state:
     st.session_state["need_reset_multipliers"] = False
+
+if "redeem_tickets" not in st.session_state:
+    st.session_state["redeem_tickets"] = []
 
 for key in GROUP_KEYS:
     if key not in st.session_state:
@@ -768,6 +882,9 @@ with b1:
     if st.button("開始計算", type="primary", use_container_width=True):
         manual_errors = []
 
+        if len(st.session_state["lines"]) == 0:
+            manual_errors.append("請先加入至少一組號碼。")
+
         for line_index, line in enumerate(st.session_state["lines"], start=1):
             duplicates = manual_line_has_cross_duplicate(line)
 
@@ -778,11 +895,19 @@ with b1:
 
         if manual_errors:
             st.session_state["calculate_clicked"] = False
-            st.error("有跨區重複號碼，請先修正：")
+            st.error("請先修正以下問題：")
             for error in manual_errors:
                 st.write(error)
         else:
             st.session_state["calculate_clicked"] = True
+            save_current_calculation_to_redeem(
+                st.session_state["lines"],
+                price_2,
+                price_3,
+                price_4,
+                price_car
+            )
+            st.success("已計算，並自動存入兌獎區。")
 
 with b2:
     if st.button("清空全部", use_container_width=True):
@@ -832,3 +957,66 @@ if st.session_state["calculate_clicked"]:
 
         if warning_items:
             st.warning("有些區塊出現重複號碼或錯誤號碼，請檢查詳細結果。")
+
+
+
+# ===== 兌獎區 =====
+
+st.subheader("🎁 兌獎區")
+st.caption("按下『開始計算』後，會依序自動存成第1張、第2張……。輸入當期 5 個開獎號碼後，會自動計算每張中了多少支。")
+
+if len(st.session_state["redeem_tickets"]) == 0:
+    st.info("目前兌獎區還沒有資料。請先按『開始計算』，系統會自動把計算內容存進來。")
+else:
+    st.markdown("#### 已儲存票券")
+    st.dataframe(redeem_ticket_summary_rows(), use_container_width=True, hide_index=True)
+
+    draw_text = st.text_input(
+        "輸入當期539開獎號碼",
+        placeholder="例如：03 10 24 29 34",
+        help="請輸入 5 個不重複的 01～39 號碼，可用空白、逗號、句點分隔。"
+    )
+
+    winning_numbers, invalid_numbers, duplicate_count = parse_winning_numbers(draw_text)
+
+    if draw_text.strip():
+        if invalid_numbers:
+            st.error("開獎號碼只能輸入 01～39。錯誤號碼：" + "、".join(str(num) for num in invalid_numbers))
+        elif duplicate_count > 0:
+            st.error("開獎號碼不可重複，請重新輸入。")
+        elif len(winning_numbers) != 5:
+            st.warning(f"目前辨識到 {len(winning_numbers)} 個號碼，請輸入剛好 5 個開獎號碼。")
+        else:
+            st.success("開獎號碼：" + "、".join(f"{num:02d}" for num in winning_numbers))
+
+            redeem_results = [
+                calculate_redeem_result(ticket, winning_numbers)
+                for ticket in st.session_state["redeem_tickets"]
+            ]
+
+            total_two_hit = sum(item["二星中獎支數"] for item in redeem_results)
+            total_three_hit = sum(item["三星中獎支數"] for item in redeem_results)
+            total_four_hit = sum(item["四星中獎支數"] for item in redeem_results)
+            total_car_hit = sum(item["車中獎支數"] for item in redeem_results)
+            total_all_hit = sum(item["總中獎支數"] for item in redeem_results)
+
+            r1, r2 = st.columns(2, gap="small")
+
+            with r1:
+                st.metric("二星總中獎支數", f"{format_num(total_two_hit)} 支")
+                st.metric("三星總中獎支數", f"{format_num(total_three_hit)} 支")
+
+            with r2:
+                st.metric("四星總中獎支數", f"{format_num(total_four_hit)} 支")
+                st.metric("車總中獎支數", f"{format_num(total_car_hit)} 支")
+
+            st.metric("全部總中獎支數", f"{format_num(total_all_hit)} 支")
+
+            st.markdown("#### 每張中獎結果")
+            st.dataframe(redeem_results, use_container_width=True, hide_index=True)
+
+    clear_redeem_col, _ = st.columns([1, 2], gap="small")
+    with clear_redeem_col:
+        if st.button("清空兌獎區", use_container_width=True):
+            st.session_state["redeem_tickets"] = []
+            st.rerun()
