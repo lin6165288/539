@@ -428,10 +428,8 @@ def clear_all_groups():
 
 
 def reset_all_multipliers():
-    st.session_state["two_multiplier"] = 0.0
-    st.session_state["three_multiplier"] = 0.0
-    st.session_state["four_multiplier"] = 0.0
-    st.session_state["car_multiplier"] = 0.0
+    # 不直接改 number_input 的 session_state，避免 StreamlitAPIException
+    st.session_state["need_reset_multipliers"] = True
 
 
 def find_duplicate_in_other_groups(active_group, num):
@@ -566,6 +564,9 @@ if "four_multiplier" not in st.session_state:
 if "car_multiplier" not in st.session_state:
     st.session_state["car_multiplier"] = 0.0
 
+if "need_reset_multipliers" not in st.session_state:
+    st.session_state["need_reset_multipliers"] = False
+
 for key in GROUP_KEYS:
     if key not in st.session_state:
         st.session_state[key] = []
@@ -670,6 +671,13 @@ else:
 
 
 # ===== 倍率 =====
+
+if st.session_state.get("need_reset_multipliers", False):
+    st.session_state["two_multiplier"] = 0.0
+    st.session_state["three_multiplier"] = 0.0
+    st.session_state["four_multiplier"] = 0.0
+    st.session_state["car_multiplier"] = 0.0
+    st.session_state["need_reset_multipliers"] = False
 
 st.markdown("### 倍率")
 st.caption("可手動輸入，也可直接點常用倍率。")
