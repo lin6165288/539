@@ -500,6 +500,15 @@ if "active_group" not in st.session_state:
 if "select_warning" not in st.session_state:
     st.session_state["select_warning"] = ""
 
+if "two_multiplier" not in st.session_state:
+    st.session_state["two_multiplier"] = 0.0
+
+if "three_multiplier" not in st.session_state:
+    st.session_state["three_multiplier"] = 0.0
+
+if "four_multiplier" not in st.session_state:
+    st.session_state["four_multiplier"] = 0.0
+
 for key in GROUP_KEYS:
     if key not in st.session_state:
         st.session_state[key] = []
@@ -569,74 +578,120 @@ if st.session_state["select_warning"]:
 
 st.markdown("### 已選號碼")
 
-row1_col1, row1_col2 = st.columns(2, gap="small")
+filled_groups = []
 
-with row1_col1:
-    for group_name in ["A區", "B區", "C區", "D區"]:
-        text = selected_to_text(st.session_state[group_name])
-        if not text:
-            text = "尚未選擇"
+for group_name in GROUP_KEYS:
+    text = selected_to_text(st.session_state[group_name])
+    if text:
+        filled_groups.append((group_name, text))
 
-        st.markdown(
-            f"""
-            <div class="selected-box">
-                <b>{group_name}</b><br>{text}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+if not filled_groups:
+    st.info("目前尚未選擇任何號碼。")
+else:
+    for group_name, text in filled_groups:
+        group_col, clear_col = st.columns([5, 1], gap="small")
 
-with row1_col2:
-    for group_name in ["E區", "F區", "G區", "H區"]:
-        text = selected_to_text(st.session_state[group_name])
-        if not text:
-            text = "尚未選擇"
+        with group_col:
+            st.markdown(
+                f"""
+                <div class="selected-box">
+                    <b>{group_name}</b><br>{text}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-        st.markdown(
-            f"""
-            <div class="selected-box">
-                <b>{group_name}</b><br>{text}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        with clear_col:
+            st.markdown('<div class="small-btn">', unsafe_allow_html=True)
 
-clear_cols = st.columns(4, gap="small")
+            if st.button(f"清{group_name[0]}", key=f"clear_{group_name}", use_container_width=True):
+                st.session_state[group_name] = []
+                st.session_state["select_warning"] = ""
+                st.rerun()
 
-for idx, group_name in enumerate(["A區", "B區", "C區", "D區"]):
-    with clear_cols[idx]:
-        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-        if st.button(f"清{group_name[0]}", use_container_width=True):
-            st.session_state[group_name] = []
-            st.session_state["select_warning"] = ""
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-clear_cols_2 = st.columns(4, gap="small")
-
-for idx, group_name in enumerate(["E區", "F區", "G區", "H區"]):
-    with clear_cols_2[idx]:
-        st.markdown('<div class="small-btn">', unsafe_allow_html=True)
-        if st.button(f"清{group_name[0]}", use_container_width=True):
-            st.session_state[group_name] = []
-            st.session_state["select_warning"] = ""
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ===== 倍率 =====
+# ===== 倍率 =====
+
+def set_multiplier(target_key, value):
+    st.session_state[target_key] = value
+
 
 st.markdown("### 倍率")
+
+st.caption("可手動輸入，也可直接點常用倍率。")
+
+quick_values = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0]
+
 m1, m2, m3 = st.columns(3, gap="small")
 
 with m1:
-    two_multiplier = st.number_input("二星", min_value=0.0, value=0.0, step=0.1, format="%.1f")
+    two_multiplier = st.number_input(
+        "二星",
+        min_value=0.0,
+        step=0.05,
+        format="%.2f",
+        key="two_multiplier"
+    )
+
+    cols = st.columns(2, gap="small")
+    for idx, value in enumerate(quick_values):
+        with cols[idx % 2]:
+            st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+            st.button(
+                f"{value:g}",
+                key=f"two_quick_{value}",
+                use_container_width=True,
+                on_click=set_multiplier,
+                args=("two_multiplier", value)
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
 
 with m2:
-    three_multiplier = st.number_input("三星", min_value=0.0, value=0.0, step=0.1, format="%.1f")
+    three_multiplier = st.number_input(
+        "三星",
+        min_value=0.0,
+        step=0.05,
+        format="%.2f",
+        key="three_multiplier"
+    )
+
+    cols = st.columns(2, gap="small")
+    for idx, value in enumerate(quick_values):
+        with cols[idx % 2]:
+            st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+            st.button(
+                f"{value:g}",
+                key=f"three_quick_{value}",
+                use_container_width=True,
+                on_click=set_multiplier,
+                args=("three_multiplier", value)
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
 
 with m3:
-    four_multiplier = st.number_input("四星", min_value=0.0, value=0.0, step=0.1, format="%.1f")
+    four_multiplier = st.number_input(
+        "四星",
+        min_value=0.0,
+        step=0.05,
+        format="%.2f",
+        key="four_multiplier"
+    )
+
+    cols = st.columns(2, gap="small")
+    for idx, value in enumerate(quick_values):
+        with cols[idx % 2]:
+            st.markdown('<div class="small-btn">', unsafe_allow_html=True)
+            st.button(
+                f"{value:g}",
+                key=f"four_quick_{value}",
+                use_container_width=True,
+                on_click=set_multiplier,
+                args=("four_multiplier", value)
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ===== 加入這組 =====
