@@ -3,6 +3,7 @@ import math
 import re
 import itertools
 import base64
+import time
 
 st.set_page_config(
     page_title="539 快速計算器",
@@ -140,6 +141,10 @@ st.markdown(
         font-size: 0.66rem !important;
         padding: 0 !important;
         border-radius: 6px !important;
+        touch-action: manipulation !important;
+        -webkit-tap-highlight-color: transparent !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
     }
 
     @media (max-width: 390px) {
@@ -479,6 +484,24 @@ def find_duplicate_in_other_groups(active_group, num):
 
 
 def add_or_remove_number(group_key, num):
+    """
+    手機快速點選防誤觸：
+    Streamlit 每點一次按鈕都會重新整理頁面，手機連點太快時，
+    有機會把同一顆按鈕事件送出兩次，造成「選取又取消」。
+    這裡會忽略極短時間內重複送出的同一顆號碼事件。
+    """
+    now = time.time()
+    last_key = st.session_state.get("last_number_click_key", "")
+    last_time = st.session_state.get("last_number_click_time", 0.0)
+    current_key = f"{group_key}_{num}"
+
+    # 0.45 秒內同一顆號碼重複觸發，視為手機連點誤觸，直接忽略
+    if current_key == last_key and now - last_time < 0.45:
+        return
+
+    st.session_state["last_number_click_key"] = current_key
+    st.session_state["last_number_click_time"] = now
+
     if num in st.session_state[group_key]:
         st.session_state[group_key].remove(num)
         st.session_state["select_warning"] = ""
@@ -826,6 +849,12 @@ if "active_group" not in st.session_state:
 
 if "select_warning" not in st.session_state:
     st.session_state["select_warning"] = ""
+
+if "last_number_click_key" not in st.session_state:
+    st.session_state["last_number_click_key"] = ""
+
+if "last_number_click_time" not in st.session_state:
+    st.session_state["last_number_click_time"] = 0.0
 
 if "two_multiplier" not in st.session_state:
     st.session_state["two_multiplier"] = 0.0
