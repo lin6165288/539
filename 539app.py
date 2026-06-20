@@ -540,7 +540,7 @@ def render_number_pad(group_key):
     真正快速版號碼盤：
     用前端 HTML/JS 先在手機本機即時選號，不會每按一顆就讓 Streamlit 重跑。
     按「套用到目前編輯區」時，才一次寫回 Python。
-    這版改用 HTML form target="_parent" 送出，避免 iframe 裡改 parent location 沒反應。
+    這版改用 document.referrer 導回外層 Streamlit app，避免 iPhone 跳到 about:srcdoc。
     """
     current_nums = list(st.session_state[group_key])
 
@@ -690,12 +690,6 @@ def render_number_pad(group_key):
             {buttons_html}
         </div>
 
-        <form id="applyForm" method="GET" target="_parent">
-            <input type="hidden" name="pad_submit" id="padSubmit" value="">
-            <input type="hidden" name="pad_group" id="padGroup" value="{group_key}">
-            <input type="hidden" name="pad_nums" id="padNums" value="">
-        </form>
-
         <div class="actions">
             <button type="button" class="apply-btn" id="applyBtn">套用到 {group_key}</button>
             <button type="button" class="clear-btn" id="clearBtn">清空</button>
@@ -749,10 +743,29 @@ def render_number_pad(group_key):
             }});
 
             document.getElementById("applyBtn").addEventListener("click", () => {{
-                document.getElementById("padSubmit").value = String(Date.now());
-                document.getElementById("padGroup").value = groupKey;
-                document.getElementById("padNums").value = selected.join(",");
-                document.getElementById("applyForm").submit();
+                const arr = selected.join(",");
+
+                // iPhone/Safari 裡，form 可能會送到 about:srcdoc。
+                // 用 document.referrer 取得外層 Streamlit App 的網址，再導回去。
+                let baseUrl = document.referrer;
+
+                try {{
+                    if (!baseUrl || baseUrl === "") {{
+                        baseUrl = window.top.location.href;
+                    }}
+
+                    const url = new URL(baseUrl);
+                    url.searchParams.set("pad_submit", String(Date.now()));
+                    url.searchParams.set("pad_group", groupKey);
+                    url.searchParams.set("pad_nums", arr);
+
+                    window.top.location.href = url.toString();
+                }} catch (e) {{
+                    const fallback = "?pad_submit=" + encodeURIComponent(String(Date.now()))
+                        + "&pad_group=" + encodeURIComponent(groupKey)
+                        + "&pad_nums=" + encodeURIComponent(arr);
+                    window.open(fallback, "_top");
+                }}
             }});
 
             updateDisplay();
