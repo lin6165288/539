@@ -1212,7 +1212,13 @@ def set_ai_draft_lines(lines):
     joined = "\n".join(cleaned_lines)
     st.session_state["ai_draft_lines"] = cleaned_lines
     st.session_state["ai_draft_text"] = joined
-    st.session_state["ai_draft_text_editor"] = joined
+
+    # 不直接改 text_area 的 session_state，避免 StreamlitAPIException。
+    # 改用版本號讓 text_area 換 key 重建。
+    st.session_state["ai_draft_text_area_version"] = (
+        st.session_state.get("ai_draft_text_area_version", 0) + 1
+    )
+
     clear_ai_line_input_keys()
 
 
@@ -1302,11 +1308,11 @@ if "redeem_tickets" not in st.session_state:
 if "ai_draft_text" not in st.session_state:
     st.session_state["ai_draft_text"] = ""
 
-if "ai_draft_text_editor" not in st.session_state:
-    st.session_state["ai_draft_text_editor"] = ""
-
 if "ai_draft_lines" not in st.session_state:
     st.session_state["ai_draft_lines"] = []
+
+if "ai_draft_text_area_version" not in st.session_state:
+    st.session_state["ai_draft_text_area_version"] = 0
 
 for key in GROUP_KEYS:
     if key not in st.session_state:
@@ -1376,9 +1382,11 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                 st.error(str(exc))
 
         st.caption("下面這個草稿框可以直接手動編輯、修正。你也可以把草稿拆成一行一行確認，OK 的就加入組別，不 OK 的就修改或刪除。")
+        ai_text_area_key = f"ai_draft_text_editor_{st.session_state.get('ai_draft_text_area_version', 0)}"
+
         ai_draft_text = st.text_area(
             "AI辨識草稿（可直接編輯）",
-            key="ai_draft_text_editor",
+            key=ai_text_area_key,
             value=st.session_state.get("ai_draft_text", ""),
             height=260,
             placeholder="AI辨識結果會出現在這裡，你可以直接修改內容後再加入。"
