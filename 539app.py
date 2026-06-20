@@ -4,6 +4,7 @@ import re
 import itertools
 import base64
 import time
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="539 快速計算器",
@@ -171,7 +172,7 @@ st.markdown(
 )
 
 st.title("🎯 539 快速計算器")
-st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉；車＝號碼數 × 倍率 × 38。快速選號預設只加入、不會點第二次取消。")
+st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉；車＝號碼數 × 倍率 × 38。號碼盤可連續快速點選。")
 
 
 # ===== 基本設定 =====
@@ -534,28 +535,227 @@ def set_multiplier(target_key, value):
 
 
 def render_number_pad(group_key):
-    numbers = list(range(1, 40))
+    """
+    真正快速版號碼盤：
+    用前端 HTML/JS 先在手機本機即時選號，不會每按一顆就讓 Streamlit 重跑。
+    按「套用到目前編輯區」時，才一次寫回 Python。
+    """
+    current_nums = sorted(st.session_state[group_key])
 
-    with st.container(key="number_pad_area"):
-        for row_start in range(0, 39, 10):
-            row_nums = numbers[row_start:row_start + 10]
-            cols = st.columns(10, gap="small")
+    other_num_owner = {}
+    for other_group in GROUP_KEYS:
+        if other_group == group_key:
+            continue
+        for num in st.session_state[other_group]:
+            other_num_owner[num] = other_group
 
-            for i, num in enumerate(row_nums):
-                label = f"{num:02d}"
+    selected_js = ",".join(str(num) for num in current_nums)
 
-                with cols[i]:
-                    st.markdown('<div class="num-btn">', unsafe_allow_html=True)
+    buttons_html = ""
+    for num in range(1, 40):
+        disabled = num in other_num_owner
+        selected_class = " selected" if num in current_nums else ""
+        disabled_class = " disabled" if disabled else ""
+        owner_text = other_num_owner.get(num, "")
+        label = f"{num:02d}"
 
-                    st.button(
-                        label,
-                        key=f"{group_key}_{num}",
-                        use_container_width=True,
-                        on_click=add_or_remove_number,
-                        args=(group_key, num)
-                    )
+        buttons_html += f"""
+        <button
+            type="button"
+            class="pad-btn{selected_class}{disabled_class}"
+            data-num="{num}"
+            data-owner="{owner_text}"
+            {'disabled' if disabled else ''}
+        >{label}</button>
+        """
 
-                    st.markdown('</div>', unsafe_allow_html=True)
+    component_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <style>
+            * {{
+                box-sizing: border-box;
+                -webkit-tap-highlight-color: transparent;
+                user-select: none;
+                -webkit-user-select: none;
+            }}
+
+            body {{
+                margin: 0;
+                padding: 0;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                background: transparent;
+            }}
+
+            .selected-display {{
+                font-size: 13px;
+                line-height: 1.35;
+                background: #f8fafc;
+                border: 1px solid #cbd5e1;
+                border-radius: 10px;
+                padding: 7px 8px;
+                margin-bottom: 6px;
+                color: #0f172a;
+                min-height: 34px;
+            }}
+
+            .pad {{
+                display: grid;
+                grid-template-columns: repeat(10, 1fr);
+                gap: 3px;
+                width: 100%;
+            }}
+
+            .pad-btn {{
+                height: 30px;
+                border-radius: 7px;
+                border: 1px solid #cbd5e1;
+                background: #ffffff;
+                color: #0f172a;
+                font-weight: 700;
+                font-size: 12px;
+                padding: 0;
+                touch-action: manipulation;
+            }}
+
+            .pad-btn:active {{
+                transform: scale(0.94);
+            }}
+
+            .pad-btn.selected {{
+                background: #f97316;
+                color: white;
+                border-color: #ea580c;
+            }}
+
+            .pad-btn.disabled {{
+                background: #e5e7eb;
+                color: #94a3b8;
+                border-color: #cbd5e1;
+            }}
+
+            .actions {{
+                display: grid;
+                grid-template-columns: 2fr 1fr;
+                gap: 6px;
+                margin-top: 8px;
+            }}
+
+            .apply-btn, .clear-btn {{
+                height: 36px;
+                border-radius: 10px;
+                border: 0;
+                font-weight: 800;
+                font-size: 14px;
+                touch-action: manipulation;
+            }}
+
+            .apply-btn {{
+                background: #f97316;
+                color: white;
+            }}
+
+            .clear-btn {{
+                background: #e2e8f0;
+                color: #0f172a;
+            }}
+
+            .hint {{
+                margin-top: 5px;
+                font-size: 12px;
+                color: #64748b;
+            }}
+
+            @media (max-width: 390px) {{
+                .pad {{
+                    gap: 2px;
+                }}
+
+                .pad-btn {{
+                    height: 28px;
+                    font-size: 11px;
+                    border-radius: 6px;
+                }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="selected-display" id="selectedDisplay"></div>
+
+        <div class="pad">
+            {buttons_html}
+        </div>
+
+        <div class="actions">
+            <button type="button" class="apply-btn" id="applyBtn">套用到 {group_key}</button>
+            <button type="button" class="clear-btn" id="clearBtn">清空</button>
+        </div>
+
+        <div class="hint">橘色＝已選；灰色＝已在其他區，不能重複。點號碼不會重整，按套用才會更新。</div>
+
+        <script>
+            const groupKey = "{group_key}";
+            let selected = new Set([{selected_js}].filter(x => x !== "").map(Number));
+
+            const selectedDisplay = document.getElementById("selectedDisplay");
+
+            function pad2(num) {{
+                return String(num).padStart(2, "0");
+            }}
+
+            function updateDisplay() {{
+                const arr = Array.from(selected).sort((a, b) => a - b);
+                if (arr.length === 0) {{
+                    selectedDisplay.innerHTML = "<b>{group_key}</b> 目前尚未選號";
+                }} else {{
+                    selectedDisplay.innerHTML = "<b>{group_key}</b> 已選：" + arr.map(pad2).join(" ");
+                }}
+            }}
+
+            document.querySelectorAll(".pad-btn").forEach(btn => {{
+                btn.addEventListener("click", () => {{
+                    if (btn.disabled) return;
+
+                    const num = Number(btn.dataset.num);
+
+                    if (selected.has(num)) {{
+                        selected.delete(num);
+                        btn.classList.remove("selected");
+                    }} else {{
+                        selected.add(num);
+                        btn.classList.add("selected");
+                    }}
+
+                    updateDisplay();
+                }}, {{ passive: true }});
+            }});
+
+            document.getElementById("clearBtn").addEventListener("click", () => {{
+                selected.clear();
+                document.querySelectorAll(".pad-btn.selected").forEach(btn => {{
+                    btn.classList.remove("selected");
+                }});
+                updateDisplay();
+            }});
+
+            document.getElementById("applyBtn").addEventListener("click", () => {{
+                const arr = Array.from(selected).sort((a, b) => a - b);
+                const params = new URLSearchParams(window.parent.location.search);
+                params.set("pad_submit", String(Date.now()));
+                params.set("pad_group", groupKey);
+                params.set("pad_nums", arr.join(","));
+                window.parent.location.search = params.toString();
+            }});
+
+            updateDisplay();
+        </script>
+    </body>
+    </html>
+    """
+
+    components.html(component_html, height=235, scrolling=False)
 
 
 def render_multiplier_control(label, state_key):
@@ -891,6 +1091,54 @@ for key in GROUP_KEYS:
         st.session_state[key] = []
 
 
+# ===== 處理快速號碼盤套用 =====
+
+if "pad_submit" in st.query_params:
+    pad_group = st.query_params.get("pad_group", "")
+    pad_nums_text = st.query_params.get("pad_nums", "")
+
+    if pad_group in GROUP_KEYS:
+        new_nums = []
+
+        for item in pad_nums_text.split(","):
+            item = item.strip()
+            if not item:
+                continue
+
+            try:
+                num = int(item)
+            except ValueError:
+                continue
+
+            if 1 <= num <= 39:
+                new_nums.append(num)
+
+        new_nums = sorted(set(new_nums))
+
+        blocked = []
+        allowed = []
+
+        for num in new_nums:
+            duplicate_group = find_duplicate_in_other_groups(pad_group, num)
+            if duplicate_group:
+                blocked.append((num, duplicate_group))
+            else:
+                allowed.append(num)
+
+        st.session_state[pad_group] = allowed
+
+        if blocked:
+            st.session_state["select_warning"] = (
+                "以下號碼已在其他區，未加入："
+                + "、".join(f"{num:02d}已在{other_group}" for num, other_group in blocked)
+            )
+        else:
+            st.session_state["select_warning"] = f"已套用到 {pad_group}。"
+
+    st.query_params.clear()
+    st.rerun()
+
+
 # ===== 照片區 =====
 
 with st.expander("📷 照片參考", expanded=False):
@@ -950,15 +1198,8 @@ if current_active_text:
 else:
     st.info(f"{active_group} 目前尚未選號。")
 
-st.radio(
-    "點選模式",
-    ["加入", "移除"],
-    horizontal=True,
-    key="number_action_mode",
-    help="手機快速點選時建議維持「加入」。按到已選號碼不會取消，需要取消時再切到「移除」。"
-)
-
 st.markdown("### 快速選號")
+st.caption("這版號碼盤可連續快速點選；點完後按「套用到目前編輯區」才會更新。")
 render_number_pad(active_group)
 
 if st.session_state["select_warning"]:
