@@ -945,10 +945,8 @@ def clean_ai_output(text):
     # 移除 Markdown code fence
     text = text.replace("```text", "").replace("```", "").strip()
 
-    # Gemini 有時候會把換行輸出成字面上的 
-，先轉回真正換行
-    text = text.replace("\n", "
-")
+    # Gemini 有時候會把換行輸出成字面上的 \n，先轉回真正換行
+    text = text.replace("\\n", "\n")
 
     cleaned_lines = []
 
@@ -987,8 +985,7 @@ def clean_ai_output(text):
 
         cleaned_lines.append(line)
 
-    return "
-".join(cleaned_lines)
+    return "\n".join(cleaned_lines)
 
 
 def recognize_lottery_image_with_gemini(uploaded_file, crop_area_name):
@@ -1018,8 +1015,7 @@ def recognize_lottery_image_with_gemini(uploaded_file, crop_area_name):
 08 | 12 24 | 03 15 | 16 23 二x0 三x0 四x0.2 車x0
 
 重要規則：
-1. 每一組一行，請輸出真正換行，不要輸出字面上的 
-。
+1. 每一組一行，請輸出真正換行，不要輸出字面上的 \\n。
 2. 這些圖片大多是橫式書寫，請優先由上到下逐組辨識；每一橫列或每一個獨立小區塊通常就是一組。
 3. 號碼只允許 01～39，請一律輸出兩位數。
 4. 請忽略標題或頁面標記，例如：6/20、539、A1、A2、A3、A4。
