@@ -171,7 +171,7 @@ st.markdown(
 )
 
 st.title("🎯 539 快速計算器")
-st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉；車＝號碼數 × 倍率 × 38。")
+st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉；車＝號碼數 × 倍率 × 38。快速選號預設只加入、不會點第二次取消。")
 
 
 # ===== 基本設定 =====
@@ -485,26 +485,36 @@ def find_duplicate_in_other_groups(active_group, num):
 
 def add_or_remove_number(group_key, num):
     """
-    手機快速點選防誤觸：
-    Streamlit 每點一次按鈕都會重新整理頁面，手機連點太快時，
-    有機會把同一顆按鈕事件送出兩次，造成「選取又取消」。
-    這裡會忽略極短時間內重複送出的同一顆號碼事件。
+    手機快速點選穩定版：
+    1. 按鈕文字不再變成 ✓，避免畫面重新排版造成誤觸。
+    2. 預設是「加入模式」：同一顆重複點擊只會忽略，不會選取又取消。
+    3. 需要取消時，切到「移除模式」再點號碼。
     """
     now = time.time()
     last_key = st.session_state.get("last_number_click_key", "")
     last_time = st.session_state.get("last_number_click_time", 0.0)
-    current_key = f"{group_key}_{num}"
+    current_key = f"{group_key}_{num}_{st.session_state.get('number_action_mode', '加入')}"
 
-    # 0.45 秒內同一顆號碼重複觸發，視為手機連點誤觸，直接忽略
-    if current_key == last_key and now - last_time < 0.45:
+    # 極短時間內同一事件重送，直接忽略
+    if current_key == last_key and now - last_time < 0.35:
         return
 
     st.session_state["last_number_click_key"] = current_key
     st.session_state["last_number_click_time"] = now
 
+    action_mode = st.session_state.get("number_action_mode", "加入")
+
+    if action_mode == "移除":
+        if num in st.session_state[group_key]:
+            st.session_state[group_key].remove(num)
+            st.session_state["select_warning"] = f"已從 {group_key} 移除 {num:02d}。"
+        else:
+            st.session_state["select_warning"] = f"{num:02d} 不在 {group_key}，不用移除。"
+        return
+
+    # 加入模式：已選過就忽略，不再取消
     if num in st.session_state[group_key]:
-        st.session_state[group_key].remove(num)
-        st.session_state["select_warning"] = ""
+        st.session_state["select_warning"] = f"{num:02d} 已經在 {group_key}。"
         return
 
     duplicate_group = find_duplicate_in_other_groups(group_key, num)
@@ -516,7 +526,7 @@ def add_or_remove_number(group_key, num):
         return
 
     st.session_state[group_key].append(num)
-    st.session_state["select_warning"] = ""
+    st.session_state["select_warning"] = f"已加入 {group_key}：{num:02d}"
 
 
 def set_multiplier(target_key, value):
@@ -532,8 +542,7 @@ def render_number_pad(group_key):
             cols = st.columns(10, gap="small")
 
             for i, num in enumerate(row_nums):
-                selected = num in st.session_state[group_key]
-                label = f"✓{num:02d}" if selected else f"{num:02d}"
+                label = f"{num:02d}"
 
                 with cols[i]:
                     st.markdown('<div class="num-btn">', unsafe_allow_html=True)
@@ -856,6 +865,9 @@ if "last_number_click_key" not in st.session_state:
 if "last_number_click_time" not in st.session_state:
     st.session_state["last_number_click_time"] = 0.0
 
+if "number_action_mode" not in st.session_state:
+    st.session_state["number_action_mode"] = "加入"
+
 if "two_multiplier" not in st.session_state:
     st.session_state["two_multiplier"] = 0.0
 
@@ -931,6 +943,20 @@ active_group = st.radio(
 )
 
 st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉。不同區不可重複同一號碼。")
+
+current_active_text = selected_to_text(st.session_state[active_group])
+if current_active_text:
+    st.info(f"{active_group} 目前已選：{current_active_text}")
+else:
+    st.info(f"{active_group} 目前尚未選號。")
+
+st.radio(
+    "點選模式",
+    ["加入", "移除"],
+    horizontal=True,
+    key="number_action_mode",
+    help="手機快速點選時建議維持「加入」。按到已選號碼不會取消，需要取消時再切到「移除」。"
+)
 
 st.markdown("### 快速選號")
 render_number_pad(active_group)
