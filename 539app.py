@@ -780,6 +780,112 @@ def redeem_result_summary_by_ticket(winning_numbers):
     return rows
 
 
+
+def normalize_ai_draft_text(text):
+    """把 AI 回傳整理成 app 可解析的草稿格式。"""
+    if not text:
+        return ""
+
+    text = text.strip()
+    text = text.replace("```text", "").replace("```", "")
+    text = text.replace("×", "x").replace("X", "x")
+    text = text.replace("，", " ").replace("、", " ").replace(",", " ")
+    text = text.replace("；", "\n").replace(";", "\n")
+
+    cleaned_lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines)
+
+
+def recognize_lottery_image_with_gemini(uploaded_file):
+    """使用 Gemini API 辨識圖片，輸出可人工核對的文字草稿。"""
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception:
+        return "", "找不到 google-genai 套件，請確認 requirements.txt 已加入 google-genai，並重新部署。"
+
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        api_key = ""
+
+    if not api_key:
+        return "", "找不到 GEMINI_API_KEY，請確認 Streamlit Secrets 已設定。"
+
+    image_bytes = uploaded_file.getvalue()
+    mime_type = uploaded_file.type or "image/jpeg"
+
+    prompt = """
+你正在辨識台灣539手寫彩券草稿。
+
+請只輸出可供程式解析的文字，不要解釋，不要加表格，不要加項目符號。
+
+輸出規則：
+1. 每一組一行。
+2. 號碼一律輸出兩位數，例如 1 要寫成 01。
+3. 一般組合格式：
+   01 02 03 04 05 二x1 三x0 四x0 車x0
+4. 分區交叉格式：
+   01 02 03 | 04 05 06 | 07 08 二x0.1 三x0.1 四x0 車x0
+5. 如果看到 X、x、×、分區、括號或明顯分成多群號碼，請用 | 分隔。
+6. 倍率可能有二、三、四、車，例如 二x0.1、三x1、四x0、車x0.3。
+7. 如果某個星別沒有看到倍率，請補成 0，例如 二x0 三x0 四x0 車x0。
+8. 看不清楚的數字請用 ?，不要猜。
+9. 不要輸出任何說明文字。
+""".strip()
+
+    try:
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                prompt,
+            ],
+        )
+
+        ai_text = getattr(response, "text", "") or ""
+        ai_text = normalize_ai_draft_text(ai_text)
+
+        if not ai_text:
+            return "", "AI 沒有回傳可用文字，請換一張更清楚的照片或重新拍攝。"
+
+        return ai_text, ""
+
+    except Exception as e:
+        return "", f"Gemini 辨識失敗：{e}"
+
+
+def ai_draft_lines_have_errors(lines):
+    errors = []
+
+    for line_index, line in enumerate(lines, start=1):
+        if "?" in line:
+            errors.append(f"AI草稿第 {line_index} 行有 ?，代表 AI 看不清楚，請先手動修正。")
+
+        parsed = parse_line(line)
+
+        if parsed["invalid_numbers"]:
+            errors.append(
+                f"AI草稿第 {line_index} 行有錯誤號碼：" +
+                "、".join(str(num) for num in parsed["invalid_numbers"])
+            )
+
+        duplicates = manual_line_has_cross_duplicate(line)
+        for num, first_group, second_group in duplicates:
+            errors.append(
+                f"AI草稿第 {line_index} 行：{num:02d} 同時出現在第 {first_group} 區與第 {second_group} 區。"
+            )
+
+    return errors
+
+
 # ===== Session State =====
 
 if "lines" not in st.session_state:
@@ -811,6 +917,9 @@ if "need_reset_multipliers" not in st.session_state:
 
 if "redeem_tickets" not in st.session_state:
     st.session_state["redeem_tickets"] = []
+
+if "ai_draft_text" not in st.session_state:
+    st.session_state["ai_draft_text"] = ""
 
 for key in GROUP_KEYS:
     if key not in st.session_state:
@@ -855,6 +964,67 @@ with st.expander("📷 照片參考", expanded=False):
             """,
             unsafe_allow_html=True
         )
+
+
+# ===== AI 辨識區 =====
+
+with st.expander("🤖 AI辨識圖片文字", expanded=False):
+    st.caption("AI 只會產生草稿，請人工核對後再加入組別。")
+
+    if uploaded_file is None:
+        st.info("請先在上方『照片參考』上傳圖片。")
+    else:
+        st.warning("手寫辨識可能會看錯，加入前一定要人工核對。")
+
+        if st.button("AI辨識圖片", use_container_width=True):
+            with st.spinner("AI 辨識中，請稍等..."):
+                ai_text, ai_error = recognize_lottery_image_with_gemini(uploaded_file)
+
+            if ai_error:
+                st.error(ai_error)
+            else:
+                st.session_state["ai_draft_text"] = ai_text
+                st.success("AI 已產生草稿，請先核對再加入。")
+                st.rerun()
+
+    ai_draft_text = st.text_area(
+        "AI辨識草稿",
+        value=st.session_state.get("ai_draft_text", ""),
+        height=180,
+        placeholder="AI辨識結果會出現在這裡。請先修正錯字、錯號、倍率，再按加入。"
+    )
+
+    st.session_state["ai_draft_text"] = ai_draft_text
+
+    add_ai_col, clear_ai_col = st.columns(2, gap="small")
+
+    with add_ai_col:
+        if st.button("把AI草稿加入組別", use_container_width=True):
+            draft_lines = [
+                line.strip()
+                for line in st.session_state["ai_draft_text"].split("\n")
+                if line.strip()
+            ]
+
+            if not draft_lines:
+                st.warning("AI草稿是空的，請先辨識或手動輸入。")
+            else:
+                draft_errors = ai_draft_lines_have_errors(draft_lines)
+
+                if draft_errors:
+                    st.error("AI草稿還有問題，請先修正：")
+                    for error in draft_errors:
+                        st.write(error)
+                else:
+                    st.session_state["lines"].extend(draft_lines)
+                    st.session_state["calculate_clicked"] = False
+                    st.success("已把 AI 草稿加入組別，請在『已加入組別』再檢查一次。")
+                    st.rerun()
+
+    with clear_ai_col:
+        if st.button("清空AI草稿", use_container_width=True):
+            st.session_state["ai_draft_text"] = ""
+            st.rerun()
 
 
 # ===== 新增一組 =====
