@@ -4,7 +4,6 @@ import re
 import itertools
 import base64
 import time
-import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="539 快速計算器",
@@ -172,7 +171,7 @@ st.markdown(
 )
 
 st.title("🎯 539 快速計算器")
-st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉；車＝號碼數 × 倍率 × 38。號碼盤可連續快速點選。")
+st.caption("填 1 區＝一般組合；填 2 區以上＝分區交叉；車＝號碼數 × 倍率 × 38。快速選號採用表單版，連續點選不重整。")
 
 
 # ===== 基本設定 =====
@@ -270,7 +269,7 @@ def group_display(groups):
 
 
 def selected_to_text(nums):
-    # 依照點選順序顯示，不自動排序
+    # 依照目前儲存順序顯示
     return " ".join(f"{num:02d}" for num in nums)
 
 
@@ -535,15 +534,46 @@ def set_multiplier(target_key, value):
     st.session_state[target_key] = value
 
 
+def apply_checkbox_pad(group_key, checked_nums):
+    """
+    表單版快速號碼盤：
+    手機可連續點選，不會每點一顆就重新整理。
+    按「套用」後才一次更新到 session_state。
+    """
+    checked_nums = [num for num in checked_nums if 1 <= num <= 39]
+
+    blocked = []
+    allowed = []
+
+    for num in checked_nums:
+        duplicate_group = find_duplicate_in_other_groups(group_key, num)
+
+        if duplicate_group:
+            blocked.append((num, duplicate_group))
+        else:
+            allowed.append(num)
+
+    # 儘量保留原本順序；新勾選的號碼依照版面順序接在後面
+    old_order = [num for num in st.session_state[group_key] if num in allowed]
+    new_additions = [num for num in allowed if num not in old_order]
+    st.session_state[group_key] = old_order + new_additions
+
+    if blocked:
+        st.session_state["select_warning"] = (
+            "以下號碼已在其他區，未加入："
+            + "、".join(f"{num:02d}已在{other_group}" for num, other_group in blocked)
+        )
+    else:
+        st.session_state["select_warning"] = f"已套用到 {group_key}。"
+
+
 def render_number_pad(group_key):
     """
-    真正快速版號碼盤：
-    用前端 HTML/JS 先在手機本機即時選號，不會每按一顆就讓 Streamlit 重跑。
-    按「套用到目前編輯區」時，才一次寫回 Python。
-    這版改用 document.referrer 導回外層 Streamlit app，避免 iPhone 跳到 about:srcdoc。
+    穩定快速版：
+    使用 Streamlit form + checkbox。
+    優點：手機可以連續點很多顆，中途不會重整、不會跳 about:srcdoc。
+    缺點：表單送出後才知道結果；同一次新勾選的號碼會依照號碼盤順序加入。
     """
-    current_nums = list(st.session_state[group_key])
-
     other_num_owner = {}
     for other_group in GROUP_KEYS:
         if other_group == group_key:
@@ -551,230 +581,38 @@ def render_number_pad(group_key):
         for num in st.session_state[other_group]:
             other_num_owner[num] = other_group
 
-    selected_js = ",".join(str(num) for num in current_nums)
+    current_set = set(st.session_state[group_key])
 
-    buttons_html = ""
-    for num in range(1, 40):
-        disabled = num in other_num_owner
-        selected_class = " selected" if num in current_nums else ""
-        disabled_class = " disabled" if disabled else ""
-        owner_text = other_num_owner.get(num, "")
-        label = f"{num:02d}"
+    with st.form(key=f"number_pad_form_{group_key}"):
+        checked_nums = []
 
-        buttons_html += f"""
-        <button
-            type="button"
-            class="pad-btn{selected_class}{disabled_class}"
-            data-num="{num}"
-            data-owner="{owner_text}"
-            {'disabled' if disabled else ''}
-        >{label}</button>
-        """
+        with st.container(key="number_pad_area"):
+            for row_start in range(0, 39, 10):
+                row_nums = list(range(1, 40))[row_start:row_start + 10]
+                cols = st.columns(10, gap="small")
 
-    component_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        <style>
-            * {{
-                box-sizing: border-box;
-                -webkit-tap-highlight-color: transparent;
-                user-select: none;
-                -webkit-user-select: none;
-            }}
+                for i, num in enumerate(row_nums):
+                    disabled = num in other_num_owner
+                    default_checked = num in current_set
+                    label = f"{num:02d}"
 
-            body {{
-                margin: 0;
-                padding: 0;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-                background: transparent;
-            }}
+                    with cols[i]:
+                        checked = st.checkbox(
+                            label,
+                            value=default_checked and not disabled,
+                            key=f"padcheck_{group_key}_{num}",
+                            disabled=disabled,
+                            label_visibility="visible"
+                        )
 
-            .selected-display {{
-                font-size: 13px;
-                line-height: 1.35;
-                background: #f8fafc;
-                border: 1px solid #cbd5e1;
-                border-radius: 10px;
-                padding: 7px 8px;
-                margin-bottom: 6px;
-                color: #0f172a;
-                min-height: 34px;
-            }}
+                        if checked and not disabled:
+                            checked_nums.append(num)
 
-            .pad {{
-                display: grid;
-                grid-template-columns: repeat(10, 1fr);
-                gap: 3px;
-                width: 100%;
-            }}
+        submitted = st.form_submit_button(f"套用到 {group_key}", use_container_width=True)
 
-            .pad-btn {{
-                height: 30px;
-                border-radius: 7px;
-                border: 1px solid #cbd5e1;
-                background: #ffffff;
-                color: #0f172a;
-                font-weight: 700;
-                font-size: 12px;
-                padding: 0;
-                touch-action: manipulation;
-            }}
-
-            .pad-btn:active {{
-                transform: scale(0.94);
-            }}
-
-            .pad-btn.selected {{
-                background: #f97316;
-                color: white;
-                border-color: #ea580c;
-            }}
-
-            .pad-btn.disabled {{
-                background: #e5e7eb;
-                color: #94a3b8;
-                border-color: #cbd5e1;
-            }}
-
-            .actions {{
-                display: grid;
-                grid-template-columns: 2fr 1fr;
-                gap: 6px;
-                margin-top: 8px;
-            }}
-
-            .apply-btn, .clear-btn {{
-                height: 36px;
-                border-radius: 10px;
-                border: 0;
-                font-weight: 800;
-                font-size: 14px;
-                touch-action: manipulation;
-            }}
-
-            .apply-btn {{
-                background: #f97316;
-                color: white;
-            }}
-
-            .clear-btn {{
-                background: #e2e8f0;
-                color: #0f172a;
-            }}
-
-            .hint {{
-                margin-top: 5px;
-                font-size: 12px;
-                color: #64748b;
-            }}
-
-            @media (max-width: 390px) {{
-                .pad {{
-                    gap: 2px;
-                }}
-
-                .pad-btn {{
-                    height: 28px;
-                    font-size: 11px;
-                    border-radius: 6px;
-                }}
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="selected-display" id="selectedDisplay"></div>
-
-        <div class="pad">
-            {buttons_html}
-        </div>
-
-        <div class="actions">
-            <button type="button" class="apply-btn" id="applyBtn">套用到 {group_key}</button>
-            <button type="button" class="clear-btn" id="clearBtn">清空</button>
-        </div>
-
-        <div class="hint">橘色＝已選；灰色＝已在其他區。顯示順序＝點選順序。點號碼不會重整，按套用才會更新。</div>
-
-        <script>
-            const groupKey = "{group_key}";
-            let selected = [{selected_js}].filter(x => x !== "").map(Number);
-
-            const selectedDisplay = document.getElementById("selectedDisplay");
-
-            function pad2(num) {{
-                return String(num).padStart(2, "0");
-            }}
-
-            function updateDisplay() {{
-                if (selected.length === 0) {{
-                    selectedDisplay.innerHTML = "<b>{group_key}</b> 目前尚未選號";
-                }} else {{
-                    selectedDisplay.innerHTML = "<b>{group_key}</b> 已選：" + selected.map(pad2).join(" ");
-                }}
-            }}
-
-            document.querySelectorAll(".pad-btn").forEach(btn => {{
-                btn.addEventListener("click", () => {{
-                    if (btn.disabled) return;
-
-                    const num = Number(btn.dataset.num);
-                    const idx = selected.indexOf(num);
-
-                    if (idx >= 0) {{
-                        selected.splice(idx, 1);
-                        btn.classList.remove("selected");
-                    }} else {{
-                        selected.push(num);
-                        btn.classList.add("selected");
-                    }}
-
-                    updateDisplay();
-                }}, {{ passive: true }});
-            }});
-
-            document.getElementById("clearBtn").addEventListener("click", () => {{
-                selected = [];
-                document.querySelectorAll(".pad-btn.selected").forEach(btn => {{
-                    btn.classList.remove("selected");
-                }});
-                updateDisplay();
-            }});
-
-            document.getElementById("applyBtn").addEventListener("click", () => {{
-                const arr = selected.join(",");
-
-                // iPhone/Safari 裡，form 可能會送到 about:srcdoc。
-                // 用 document.referrer 取得外層 Streamlit App 的網址，再導回去。
-                let baseUrl = document.referrer;
-
-                try {{
-                    if (!baseUrl || baseUrl === "") {{
-                        baseUrl = window.top.location.href;
-                    }}
-
-                    const url = new URL(baseUrl);
-                    url.searchParams.set("pad_submit", String(Date.now()));
-                    url.searchParams.set("pad_group", groupKey);
-                    url.searchParams.set("pad_nums", arr);
-
-                    window.top.location.href = url.toString();
-                }} catch (e) {{
-                    const fallback = "?pad_submit=" + encodeURIComponent(String(Date.now()))
-                        + "&pad_group=" + encodeURIComponent(groupKey)
-                        + "&pad_nums=" + encodeURIComponent(arr);
-                    window.open(fallback, "_top");
-                }}
-            }});
-
-            updateDisplay();
-        </script>
-    </body>
-    </html>
-    """
-
-    components.html(component_html, height=235, scrolling=False)
+        if submitted:
+            apply_checkbox_pad(group_key, checked_nums)
+            st.rerun()
 
 
 def render_multiplier_control(label, state_key):
@@ -1110,63 +948,6 @@ for key in GROUP_KEYS:
         st.session_state[key] = []
 
 
-# ===== 處理快速號碼盤套用 =====
-
-if "pad_submit" in st.query_params:
-    pad_group = st.query_params.get("pad_group", "")
-    pad_nums_text = st.query_params.get("pad_nums", "")
-
-    if pad_group in GROUP_KEYS:
-        new_nums = []
-
-        for item in pad_nums_text.split(","):
-            item = item.strip()
-            if not item:
-                continue
-
-            try:
-                num = int(item)
-            except ValueError:
-                continue
-
-            if 1 <= num <= 39:
-                new_nums.append(num)
-
-        # 保留點選順序，並去掉重複
-        ordered_unique_nums = []
-        seen_nums = set()
-
-        for num in new_nums:
-            if num not in seen_nums:
-                ordered_unique_nums.append(num)
-                seen_nums.add(num)
-
-        new_nums = ordered_unique_nums
-
-        blocked = []
-        allowed = []
-
-        for num in new_nums:
-            duplicate_group = find_duplicate_in_other_groups(pad_group, num)
-            if duplicate_group:
-                blocked.append((num, duplicate_group))
-            else:
-                allowed.append(num)
-
-        st.session_state[pad_group] = allowed
-
-        if blocked:
-            st.session_state["select_warning"] = (
-                "以下號碼已在其他區，未加入："
-                + "、".join(f"{num:02d}已在{other_group}" for num, other_group in blocked)
-            )
-        else:
-            st.session_state["select_warning"] = f"已套用到 {pad_group}。"
-
-    st.query_params.clear()
-    st.rerun()
-
-
 # ===== 照片區 =====
 
 with st.expander("📷 照片參考", expanded=False):
@@ -1227,7 +1008,7 @@ else:
     st.info(f"{active_group} 目前尚未選號。")
 
 st.markdown("### 快速選號")
-st.caption("這版號碼盤可連續快速點選；點完後按「套用到目前編輯區」才會更新。")
+st.caption("連續勾選號碼後，按「套用到目前編輯區」。中途不會重整，手機操作會比較順。")
 render_number_pad(active_group)
 
 if st.session_state["select_warning"]:
