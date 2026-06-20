@@ -3,6 +3,20 @@ import math
 import re
 import itertools
 import base64
+import io
+import time
+
+try:
+    from google import genai
+    from google.genai import types
+except Exception:
+    genai = None
+    types = None
+
+try:
+    from PIL import Image
+except Exception:
+    Image = None
 
 st.set_page_config(
     page_title="539 快速計算器",
@@ -208,6 +222,40 @@ def parse_numbers(text):
     return unique_numbers, invalid_numbers, duplicate_count
 
 
+def normalize_combined_multipliers(line):
+    """
+    支援簡寫：
+    二三x0.1 = 二x0.1 三x0.1
+    二三四x0.1 = 二x0.1 三x0.1 四x0.1
+    23x0.1 = 二x0.1 三x0.1
+    234x0.1 = 二x0.1 三x0.1 四x0.1
+    """
+    mapping = {
+        "二": "二",
+        "三": "三",
+        "四": "四",
+        "2": "二",
+        "3": "三",
+        "4": "四",
+    }
+
+    pattern = r"([二三四234]{2,3})\s*[xX×]\s*(\d+(?:\.\d+)?)"
+
+    def repl(match):
+        stars_raw = match.group(1)
+        value = match.group(2)
+
+        stars = []
+        for ch in stars_raw:
+            star = mapping.get(ch)
+            if star and star not in stars:
+                stars.append(star)
+
+        return " ".join(f"{star}x{value}" for star in stars)
+
+    return re.sub(pattern, repl, line)
+
+
 def cross_group_count(groups, star):
     if len(groups) < star:
         return 0
@@ -267,6 +315,7 @@ def parse_multiplier(line, star_patterns):
 
 def parse_line(line):
     original_line = line
+    line = normalize_combined_multipliers(line)
 
     two_multiplier, line = parse_multiplier(line, ["二", "2"])
     three_multiplier, line = parse_multiplier(line, ["三", "3"])
@@ -780,6 +829,200 @@ def redeem_result_summary_by_ticket(winning_numbers):
     return rows
 
 
+
+# ===== AI 辨識工具 =====
+
+CROP_AREAS = {
+    "整張": (0.0, 0.0, 1.0, 1.0),
+    "左上": (0.0, 0.0, 0.42, 0.36),
+    "上方": (0.28, 0.0, 0.72, 0.36),
+    "右上": (0.58, 0.0, 1.0, 0.36),
+    "左中": (0.0, 0.28, 0.42, 0.68),
+    "中間": (0.28, 0.28, 0.72, 0.68),
+    "右中": (0.58, 0.28, 1.0, 0.68),
+    "左下": (0.0, 0.60, 0.42, 1.0),
+    "下方": (0.25, 0.60, 0.75, 1.0),
+    "右下": (0.58, 0.60, 1.0, 1.0),
+}
+
+
+def crop_uploaded_image_bytes(uploaded_file, crop_area_name):
+    image_bytes = uploaded_file.getvalue()
+    mime_type = uploaded_file.type or "image/jpeg"
+
+    if crop_area_name == "整張" or Image is None:
+        return image_bytes, mime_type
+
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    width, height = image.size
+
+    left_r, top_r, right_r, bottom_r = CROP_AREAS.get(crop_area_name, CROP_AREAS["整張"])
+    left = int(width * left_r)
+    top = int(height * top_r)
+    right = int(width * right_r)
+    bottom = int(height * bottom_r)
+
+    cropped = image.crop((left, top, right, bottom))
+
+    output = io.BytesIO()
+    cropped.save(output, format="JPEG", quality=95)
+    return output.getvalue(), "image/jpeg"
+
+
+def preview_crop_image(uploaded_file, crop_area_name):
+    if uploaded_file is None:
+        return
+
+    image_bytes, mime_type = crop_uploaded_image_bytes(uploaded_file, crop_area_name)
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    st.markdown(
+        f"""
+        <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:6px;margin-bottom:8px;">
+            <div style="font-size:0.82rem;color:#475569;margin-bottom:4px;">AI 實際辨識範圍：{crop_area_name}</div>
+            <img style="width:100%;max-height:260px;object-fit:contain;border-radius:8px;" src="data:{mime_type};base64,{image_base64}">
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def clean_ai_output(text):
+    text = text.strip()
+
+    # 移除 Markdown code fence
+    text = text.replace("```text", "").replace("```", "").strip()
+
+    cleaned_lines = []
+
+    for line in text.splitlines():
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # 移除 AI 可能輸出的項目符號
+        line = re.sub(r"^[\\-•*]\\s*", "", line)
+
+        # 移除位置標籤，例如：左上 =>、中間：
+        line = re.sub(r"^(左上|上方|右上|左中|中間|右中|左下|下方|右下|位置不確定)\\s*(=>|:|：)\\s*", "", line)
+
+        # 統一分隔符
+        line = line.replace("×", "x").replace("X", "x")
+        line = re.sub(r"\\s+", " ", line)
+
+        # 展開 二三x0.1
+        line = normalize_combined_multipliers(line)
+
+        cleaned_lines.append(line)
+
+    return "\\n".join(cleaned_lines)
+
+
+def recognize_lottery_image_with_gemini(uploaded_file, crop_area_name):
+    if genai is None or types is None:
+        raise RuntimeError("尚未安裝 google-genai。請確認 requirements.txt 有 google-genai。")
+
+    api_key = st.secrets.get("GEMINI_API_KEY", "")
+
+    if not api_key:
+        raise RuntimeError("找不到 GEMINI_API_KEY。請到 Streamlit Secrets 加上 GEMINI_API_KEY。")
+
+    image_bytes, mime_type = crop_uploaded_image_bytes(uploaded_file, crop_area_name)
+
+    client = genai.Client(api_key=api_key)
+
+    prompt = f"""
+你正在辨識台灣539手寫彩券草稿。
+請辨識整張圖片。
+
+請只輸出可供程式解析的文字，不要解釋，不要加編號。
+
+輸出格式：
+一般組合：
+01 02 03 04 05 二x1 三x0 四x0 車x0
+
+分區交叉：
+01 02 03 | 04 05 06 | 07 08 二x0.1 三x0.1 四x0 車x0
+
+重要規則：
+1. 每一組一行。
+2. 本圖片會以「橫式書寫」為主，請優先從左到右讀。
+3. 號碼只允許 01～39，請一律輸出兩位數。
+4. 如果同一行中有 x、X、× 分隔不同群號碼，請用 | 分隔。
+5. 例如「14 x 20 39 x 09 28 二三x0.3」要輸出：
+   14 | 20 39 | 09 28 二x0.3 三x0.3 四x0 車x0
+6. 如果看到「二三x0.1」、「23x0.1」、「==x0.1」，代表二x0.1、三x0.1。
+7. 如果看到「二三四x0.1」、「234x0.1」，代表二x0.1、三x0.1、四x0.1。
+8. 如果沒有看到某星別倍率，請補 0，例如 三x0 四x0 車x0。
+9. 看不清楚請用 ?，不要猜。
+10. 不要把日期、539、6/20 這種標題當下注號碼。
+11. 不要輸出位置名稱、編號或說明文字。
+"""
+
+    last_error = None
+
+    for wait_seconds in [0, 2, 5]:
+        if wait_seconds:
+            time.sleep(wait_seconds)
+
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    prompt,
+                ],
+            )
+
+            result_text = getattr(response, "text", "")
+
+            if not result_text:
+                raise RuntimeError("Gemini 沒有回傳文字。")
+
+            return clean_ai_output(result_text)
+
+        except Exception as exc:
+            last_error = exc
+            error_text = str(exc)
+
+            # 忙線才重試
+            if "503" not in error_text and "UNAVAILABLE" not in error_text:
+                break
+
+    raise RuntimeError(f"Gemini 辨識失敗：{last_error}")
+
+
+def validate_ai_draft_lines(lines):
+    errors = []
+
+    for line_index, line in enumerate(lines, start=1):
+        if "?" in line:
+            errors.append(f"第 {line_index} 行含有 ?，請先人工確認。")
+            continue
+
+        parsed = parse_line(line)
+
+        if parsed["invalid_numbers"]:
+            errors.append(
+                f"第 {line_index} 行有錯誤號碼："
+                + "、".join(str(num) for num in parsed["invalid_numbers"])
+            )
+
+        duplicates = manual_line_has_cross_duplicate(line)
+
+        for num, first_group, second_group in duplicates:
+            errors.append(
+                f"第 {line_index} 行：{num:02d} 同時出現在第 {first_group} 區與第 {second_group} 區。"
+            )
+
+        if len(parsed["numbers"]) == 0:
+            errors.append(f"第 {line_index} 行沒有辨識到有效號碼。")
+
+    return errors
+
+
+
 # ===== Session State =====
 
 if "lines" not in st.session_state:
@@ -811,6 +1054,9 @@ if "need_reset_multipliers" not in st.session_state:
 
 if "redeem_tickets" not in st.session_state:
     st.session_state["redeem_tickets"] = []
+
+if "ai_draft_text" not in st.session_state:
+    st.session_state["ai_draft_text"] = ""
 
 for key in GROUP_KEYS:
     if key not in st.session_state:
@@ -855,6 +1101,68 @@ with st.expander("📷 照片參考", expanded=False):
             """,
             unsafe_allow_html=True
         )
+
+
+
+
+# ===== AI 辨識區 =====
+
+with st.expander("🤖 AI辨識圖片文字", expanded=False):
+    st.caption("AI 只辨識整張圖片並產生草稿；請人工核對後再加入組別。手動選號模式仍保留。")
+
+    if uploaded_file is None:
+        st.info("請先在照片參考區上傳圖片。")
+    else:
+        st.info("目前設定為辨識整張圖片。建議上傳橫式書寫、單張內容不要太雜的照片。")
+
+        if st.button("AI辨識整張圖片", use_container_width=True):
+            try:
+                with st.spinner("AI辨識中，請稍候..."):
+                    ai_text = recognize_lottery_image_with_gemini(uploaded_file, "整張")
+
+                st.session_state["ai_draft_text"] = ai_text
+                st.success("AI辨識完成，請先核對草稿。")
+            except Exception as exc:
+                st.error(str(exc))
+
+        ai_draft_text = st.text_area(
+            "AI辨識草稿",
+            value=st.session_state.get("ai_draft_text", ""),
+            height=160,
+            placeholder="AI辨識結果會出現在這裡，你可以先修改再加入。"
+        )
+
+        st.session_state["ai_draft_text"] = ai_draft_text
+
+        add_ai_col, clear_ai_col = st.columns(2, gap="small")
+
+        with add_ai_col:
+            if st.button("把AI草稿加入組別", use_container_width=True):
+                draft_lines = [
+                    normalize_combined_multipliers(line.strip())
+                    for line in st.session_state["ai_draft_text"].split("\n")
+                    if line.strip()
+                ]
+
+                if not draft_lines:
+                    st.warning("AI草稿是空的。")
+                else:
+                    errors = validate_ai_draft_lines(draft_lines)
+
+                    if errors:
+                        st.error("AI草稿有問題，請先修正：")
+                        for error in errors:
+                            st.write(error)
+                    else:
+                        st.session_state["lines"].extend(draft_lines)
+                        st.session_state["calculate_clicked"] = False
+                        st.success("已把 AI 草稿加入組別。")
+                        st.rerun()
+
+        with clear_ai_col:
+            if st.button("清空AI草稿", use_container_width=True):
+                st.session_state["ai_draft_text"] = ""
+                st.rerun()
 
 
 # ===== 新增一組 =====
