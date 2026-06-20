@@ -943,7 +943,7 @@ def clean_ai_output(text):
 
         cleaned_lines.append(line)
 
-    return "\\n".join(cleaned_lines)
+    return "\n".join(cleaned_lines)
 
 
 def recognize_lottery_image_with_gemini(uploaded_file, crop_area_name):
@@ -1057,6 +1057,9 @@ def validate_ai_draft_lines(lines):
 
 def ai_draft_review_rows(text):
     rows = []
+
+    # 保險：如果草稿裡還殘留字面上的 \n，也先轉成真正換行
+    text = text.replace("\\n", "\n")
 
     lines = [
         normalize_combined_multipliers(line.strip())
@@ -1213,6 +1216,8 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
             placeholder="AI辨識結果會出現在這裡，你可以先修改再加入。"
         )
 
+        # 保險：如果 AI 或手動貼上的內容含有字面上的 \n，轉成真正換行
+        ai_draft_text = ai_draft_text.replace("\\n", "\n")
         st.session_state["ai_draft_text"] = ai_draft_text
 
         if st.session_state["ai_draft_text"].strip():
