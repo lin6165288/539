@@ -336,6 +336,23 @@ def parse_multiplier(line, star_patterns):
     return 0.0, line
 
 
+def normalize_cross_group_separator(line):
+    """
+    AI 不一定會乖乖輸出 |，有時會保留 x / × 當作分區交叉分隔。
+    在倍率被移除之後，剩下的 x / × 幾乎都可以視為分區分隔符。
+    """
+    line = line.replace("×", " x ").replace("X", " x ")
+
+    # 把獨立的 x 視為分區交叉分隔符
+    line = re.sub(r"\s+x\s+", " | ", line)
+
+    # 清理多餘空白
+    line = re.sub(r"\s*\|\s*", " | ", line)
+    line = re.sub(r"\s+", " ", line).strip()
+
+    return line
+
+
 def parse_line(line):
     original_line = line
     line = normalize_combined_multipliers(line)
@@ -344,6 +361,9 @@ def parse_line(line):
     three_multiplier, line = parse_multiplier(line, ["三", "3"])
     four_multiplier, line = parse_multiplier(line, ["四", "4"])
     car_multiplier, line = parse_multiplier(line, ["車"])
+
+    # 倍率移除後，如果還有 x / ×，通常就是分區交叉分隔符
+    line = normalize_cross_group_separator(line)
 
     is_cross_group = "|" in line
 
@@ -910,40 +930,65 @@ def preview_crop_image(uploaded_file, crop_area_name):
     )
 
 
+def is_multiplier_only_line(line):
+    temp = normalize_combined_multipliers(line)
+    temp = temp.replace("×", "x").replace("X", "x")
+    temp = re.sub(r"\s+", " ", temp).strip()
+
+    pattern = r"^(?:(?:二|三|四|車)x\d+(?:\.\d+)?)(?:\s+(?:二|三|四|車)x\d+(?:\.\d+)?)*$"
+    return bool(re.fullmatch(pattern, temp))
+
+
 def clean_ai_output(text):
     text = text.strip()
 
     # 移除 Markdown code fence
     text = text.replace("```text", "").replace("```", "").strip()
 
-    # Gemini 有時候會把換行輸出成字面上的 \n，先轉回真正換行
-    text = text.replace("\\n", "\n")
+    # Gemini 有時候會把換行輸出成字面上的 
+，先轉回真正換行
+    text = text.replace("\n", "
+")
 
     cleaned_lines = []
 
-    for line in text.splitlines():
-        line = line.strip()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
 
         if not line:
             continue
 
         # 移除 AI 可能輸出的項目符號或編號
-        line = re.sub(r"^[\\-•*]\\s*", "", line)
-        line = re.sub(r"^\\d+[\\.、\\)]\\s*", "", line)
+        line = re.sub(r"^[\-•*]\s*", "", line)
+        line = re.sub(r"^\d+[\.、\)]\s*", "", line)
 
         # 移除位置標籤，例如：左上 =>、中間：
-        line = re.sub(r"^(左上|上方|右上|左中|中間|右中|左下|下方|右下|位置不確定)\\s*(=>|:|：)\\s*", "", line)
+        line = re.sub(r"^(左上|上方|右上|左中|中間|右中|左下|下方|右下|位置不確定)\s*(=>|:|：)\s*", "", line)
+
+        # 忽略頁面標記，例如 A1 / A2 / A3 / A4 / 539 / 日期
+        if re.fullmatch(r"A\s*\d+", line, flags=re.I):
+            continue
+        if re.fullmatch(r"\d{1,2}\s*/\s*\d{1,2}", line):
+            continue
+        if re.fullmatch(r"539", line):
+            continue
 
         # 統一分隔符
         line = line.replace("×", "x").replace("X", "x")
-        line = re.sub(r"\\s+", " ", line)
+        line = re.sub(r"\s+", " ", line)
 
         # 展開 2x0.1、23x0.1、二三x0.1、==x0.1
         line = normalize_combined_multipliers(line)
 
+        # 如果某一行只有倍率，且前一行已有號碼，則自動接到前一行後面
+        if cleaned_lines and is_multiplier_only_line(line):
+            cleaned_lines[-1] = (cleaned_lines[-1] + " " + line).strip()
+            continue
+
         cleaned_lines.append(line)
 
-    return "\n".join(cleaned_lines)
+    return "
+".join(cleaned_lines)
 
 
 def recognize_lottery_image_with_gemini(uploaded_file, crop_area_name):
@@ -961,36 +1006,77 @@ def recognize_lottery_image_with_gemini(uploaded_file, crop_area_name):
 
     prompt = f"""
 你正在辨識台灣539手寫彩券草稿。
-請辨識整張圖片。
+這個使用者之後上傳的圖片版型幾乎固定，請根據以下規則辨識整張圖片。
 
-請只輸出可供程式解析的文字，不要解釋，不要加編號。
+請只輸出可供程式解析的文字，不要解釋，不要加編號，不要加位置名稱。
 
-輸出格式：
+輸出格式只允許下面兩種：
 一般組合：
-01 02 03 04 05 二x1 三x0 四x0 車x0
+01 02 03 04 05 二x0 三x0 四x0.1 車x0
 
 分區交叉：
-01 02 03 | 04 05 06 | 07 08 二x0.1 三x0.1 四x0 車x0
+08 | 12 24 | 03 15 | 16 23 二x0 三x0 四x0.2 車x0
 
 重要規則：
-1. 每一組一行，請輸出真正換行，不要輸出字面上的 \\n。
-2. 本圖片會以「橫式書寫」為主，請優先從左到右讀。
+1. 每一組一行，請輸出真正換行，不要輸出字面上的 
+。
+2. 這些圖片大多是橫式書寫，請優先由上到下逐組辨識；每一橫列或每一個獨立小區塊通常就是一組。
 3. 號碼只允許 01～39，請一律輸出兩位數。
-4. 如果同一行中有 x、X、× 分隔不同群號碼，請用 | 分隔。
+4. 請忽略標題或頁面標記，例如：6/20、539、A1、A2、A3、A4。
 5. 倍率可能寫成：
    2x0.1 = 二x0.1
    3x0.1 = 三x0.1
    4x0.1 = 四x0.1
    23x0.1 / 二三x0.1 / ==x0.1 = 二x0.1 三x0.1
    234x0.1 / 二三四x0.1 = 二x0.1 三x0.1 四x0.1
-6. 例如「14 x 20 39 x 09 28 23x0.3」要輸出：
-   14 | 20 39 | 09 28 二x0.3 三x0.3 四x0 車x0
-7. 例如「12 14 27 21 31 03 4x0.1」要輸出：
-   12 14 27 21 31 03 二x0 三x0 四x0.1 車x0
-8. 如果沒有看到某星別倍率，請補 0，例如 二x0 三x0 四x0 車x0。
-9. 看不清楚請用 ?，不要猜。
-10. 不要把日期、539、6/20 這種標題當下注號碼。
-11. 不要輸出位置名稱、編號或說明文字。
+6. 如果沒有看到某星別倍率，請補 0，例如：二x0 三x0 四x0 車x0。
+7. 如果同一組中出現 x / X / × 分隔不同欄位，通常代表分區交叉，請輸出成 | 分隔，不要省略。
+8. 如果同一欄有上下堆疊的號碼，表示它們屬於同一區，要合併在一起。
+9. 如果倍率另起一行，請把倍率併回上一組，不要獨立成一行。
+10. 如果右側另有一個獨立小區塊，也請視為新的獨立一組。
+11. 看不清楚請用 ?，不要猜。
+
+以下是這個使用者常見格式的範例，請盡量照這個邏輯辨識：
+
+範例 A（一般組合）
+圖片：03,07,14,21,20,31,35 4x0.5
+輸出：
+03 07 14 21 20 31 35 二x0 三x0 四x0.5 車x0
+
+範例 B（一般組合，倍率寫成數字）
+圖片：15,38,39 = 三x0.5
+輸出：
+15 38 39 二x0 三x0.5 四x0 車x0
+
+範例 C（分區交叉，上下堆疊同欄）
+圖片：
+08 x 12 x 03 x 16
+   24   15   23
+4x0.2
+輸出：
+08 | 12 24 | 03 15 | 16 23 二x0 三x0 四x0.2 車x0
+
+範例 D（分區交叉，兩排對齊）
+圖片：
+03   12   35   06
+33 x 22 x 39 x 08
+4x0.2
+輸出：
+03 33 | 12 22 | 35 39 | 06 08 二x0 三x0 四x0.2 車x0
+
+範例 E（分區交叉，一列內直接寫）
+圖片：14 x 20 39 x 09 28 ==x0.3
+輸出：
+14 | 20 39 | 09 28 二x0.3 三x0.3 四x0 車x0
+
+範例 F（多個倍率分行寫在同一組下方）
+圖片：
+08 11 36 38
+2x1
+3x7
+4x0.1
+輸出：
+08 11 36 38 二x1 三x7 四x0.1 車x0
 """
 
     last_error = None
@@ -1001,7 +1087,7 @@ def recognize_lottery_image_with_gemini(uploaded_file, crop_area_name):
 
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="gemini-2.5-flash",
                 contents=[
                     types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                     prompt,
@@ -1142,6 +1228,9 @@ if "redeem_tickets" not in st.session_state:
 if "ai_draft_text" not in st.session_state:
     st.session_state["ai_draft_text"] = ""
 
+if "ai_draft_text_editor" not in st.session_state:
+    st.session_state["ai_draft_text_editor"] = ""
+
 for key in GROUP_KEYS:
     if key not in st.session_state:
         st.session_state[key] = []
@@ -1192,12 +1281,12 @@ with st.expander("📷 照片參考", expanded=False):
 # ===== AI 辨識區 =====
 
 with st.expander("🤖 AI辨識圖片文字", expanded=False):
-    st.caption("AI 只辨識整張圖片並產生草稿；請人工核對後再加入組別。手動選號模式仍保留。")
+    st.caption("AI 只辨識整張圖片並產生草稿；已針對你常見的 A1/A2/A3/A4 橫式手寫格式加強。手動選號模式仍保留。")
 
     if uploaded_file is None:
         st.info("請先在照片參考區上傳圖片。")
     else:
-        st.info("目前設定為辨識整張圖片。建議上傳橫式書寫、單張內容不要太雜的照片。")
+        st.info("目前設定為辨識整張圖片，並優先針對你常見的橫式手寫格式處理。若 AI 有錯，仍可直接修改下方草稿。")
 
         if st.button("AI辨識整張圖片", use_container_width=True):
             try:
@@ -1205,15 +1294,18 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                     ai_text = recognize_lottery_image_with_gemini(uploaded_file, "整張")
 
                 st.session_state["ai_draft_text"] = ai_text
+                st.session_state["ai_draft_text_editor"] = ai_text
                 st.success("AI辨識完成，請先核對草稿。")
             except Exception as exc:
                 st.error(str(exc))
 
+        st.caption("下面這個草稿框可以直接手動編輯、修正，再加入組別。若本來應該是分區交叉，請確認有用 | 分隔各區。")
         ai_draft_text = st.text_area(
-            "AI辨識草稿",
+            "AI辨識草稿（可直接編輯）",
+            key="ai_draft_text_editor",
             value=st.session_state.get("ai_draft_text", ""),
-            height=160,
-            placeholder="AI辨識結果會出現在這裡，你可以先修改再加入。"
+            height=260,
+            placeholder="AI辨識結果會出現在這裡，你可以直接修改內容後再加入。"
         )
 
         # 保險：如果 AI 或手動貼上的內容含有字面上的 \n，轉成真正換行
@@ -1257,6 +1349,7 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
         with clear_ai_col:
             if st.button("清空AI草稿", use_container_width=True):
                 st.session_state["ai_draft_text"] = ""
+                st.session_state["ai_draft_text_editor"] = ""
                 st.rerun()
 
 
