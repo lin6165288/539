@@ -828,16 +828,19 @@ def recognize_lottery_image_with_gemini(uploaded_file):
 
 輸出規則：
 1. 每一組一行。
-2. 號碼一律輸出兩位數，例如 1 要寫成 01。
-3. 一般組合格式：
-   01 02 03 04 05 二x1 三x0 四x0 車x0
-4. 分區交叉格式：
-   01 02 03 | 04 05 06 | 07 08 二x0.1 三x0.1 四x0 車x0
-5. 如果看到 X、x、×、分區、括號或明顯分成多群號碼，請用 | 分隔。
-6. 倍率可能有二、三、四、車，例如 二x0.1、三x1、四x0、車x0.3。
-7. 如果某個星別沒有看到倍率，請補成 0，例如 二x0 三x0 四x0 車x0。
-8. 看不清楚的數字請用 ?，不要猜。
-9. 不要輸出任何說明文字。
+2. 每一行都要先標示你判斷它在照片中的大約位置，格式固定為：位置 => 內容
+3. 位置只能使用下列詞之一：左上、上方、中上、右上、左中、中間、右中、左下、下方、右下、位置不確定。
+4. 不要使用第1、第2、1、2、①、② 等編號，避免程式誤判成號碼。
+5. 號碼一律輸出兩位數，例如 1 要寫成 01。
+6. 一般組合格式：
+   上方 => 01 02 03 04 05 二x1 三x0 四x0 車x0
+7. 分區交叉格式：
+   中間 => 01 02 03 | 04 05 06 | 07 08 二x0.1 三x0.1 四x0 車x0
+8. 如果看到 X、x、×、分區、括號或明顯分成多群號碼，請用 | 分隔。
+9. 倍率可能有二、三、四、車，例如 二x0.1、三x1、四x0、車x0.3。
+10. 如果某個星別沒有看到倍率，請補成 0，例如 二x0 三x0 四x0 車x0。
+11. 看不清楚的數字請用 ?，不要猜。
+12. 不要輸出任何說明文字。
 """.strip()
 
     try:
@@ -884,6 +887,87 @@ def ai_draft_lines_have_errors(lines):
             )
 
     return errors
+
+
+AI_LOCATION_WORDS = [
+    "左上", "上方", "中上", "右上",
+    "左中", "中間", "右中",
+    "左下", "下方", "右下", "位置不確定"
+]
+
+
+def split_ai_location_and_content(line):
+    """將 AI 草稿拆成「照片位置」與「可加入組別的內容」。"""
+    line = (line or "").strip()
+    line = re.sub(r"^[\-\*\s]+", "", line)
+
+    default_location = "位置不確定"
+
+    for separator in ["=>", "＝>", "→", "：", ":"]:
+        if separator in line:
+            left, right = line.split(separator, 1)
+            left = left.strip()
+            right = right.strip()
+
+            # 位置欄不能有阿拉伯數字，避免「第1筆」被當成號碼
+            if not re.search(r"\d", left):
+                for word in AI_LOCATION_WORDS:
+                    if word in left:
+                        return word, right
+
+    return default_location, line
+
+
+def build_ai_review_rows(ai_text):
+    rows = []
+
+    for raw_line in ai_text.splitlines():
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+
+        location, content = split_ai_location_and_content(raw_line)
+        rows.append({
+            "加入": True,
+            "照片位置": location,
+            "草稿內容": content,
+            "檢查提示": summarize_ai_review_line(content),
+        })
+
+    return rows
+
+
+def summarize_ai_review_line(line):
+    if not line.strip():
+        return "空白"
+
+    warnings = []
+
+    if "?" in line:
+        warnings.append("有?待修正")
+
+    parsed = parse_line(line)
+
+    if parsed["invalid_numbers"]:
+        warnings.append("有錯誤號碼")
+
+    duplicates = manual_line_has_cross_duplicate(line)
+    if duplicates:
+        warnings.append("跨區重複")
+
+    mode = parsed["mode"]
+    number_count = len(parsed["numbers"])
+    multipliers = (
+        f"二{parsed['two_multiplier']:g} "
+        f"三{parsed['three_multiplier']:g} "
+        f"四{parsed['four_multiplier']:g} "
+        f"車{parsed['car_multiplier']:g}"
+    )
+
+    if warnings:
+        return f"⚠️ {'、'.join(warnings)}｜{mode}｜{number_count}碼｜{multipliers}"
+
+    return f"✅ {mode}｜{number_count}碼｜{multipliers}"
 
 
 # ===== Session State =====
@@ -969,7 +1053,7 @@ with st.expander("📷 照片參考", expanded=False):
 # ===== AI 辨識區 =====
 
 with st.expander("🤖 AI辨識圖片文字", expanded=False):
-    st.caption("AI 只會產生草稿，請人工核對後再加入組別。")
+    st.caption("AI 只會產生草稿。現在改成表格核對：每一筆會顯示照片位置、草稿內容與檢查提示。")
 
     if uploaded_file is None:
         st.info("請先在上方『照片參考』上傳圖片。")
@@ -984,47 +1068,83 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                 st.error(ai_error)
             else:
                 st.session_state["ai_draft_text"] = ai_text
-                st.success("AI 已產生草稿，請先核對再加入。")
+                st.success("AI 已產生草稿，請在下方表格逐筆核對。")
                 st.rerun()
 
-    ai_draft_text = st.text_area(
-        "AI辨識草稿",
-        value=st.session_state.get("ai_draft_text", ""),
-        height=180,
-        placeholder="AI辨識結果會出現在這裡。請先修正錯字、錯號、倍率，再按加入。"
-    )
+    ai_review_rows = build_ai_review_rows(st.session_state.get("ai_draft_text", ""))
 
-    st.session_state["ai_draft_text"] = ai_draft_text
+    if not ai_review_rows:
+        st.info("AI辨識後，草稿會整理成表格出現在這裡。")
+    else:
+        st.markdown("#### AI核對表")
+        st.caption("『照片位置』是 AI 判斷的大概位置；請主要核對『草稿內容』。不想加入的那筆，把『加入』取消勾選。")
 
-    add_ai_col, clear_ai_col = st.columns(2, gap="small")
+        edited_ai_rows = st.data_editor(
+            ai_review_rows,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            column_config={
+                "加入": st.column_config.CheckboxColumn("加入", help="勾選後才會加入組別", default=True),
+                "照片位置": st.column_config.TextColumn("照片位置", disabled=True, width="small"),
+                "草稿內容": st.column_config.TextColumn(
+                    "草稿內容",
+                    help="可以直接修改號碼、分區與倍率",
+                    width="large"
+                ),
+                "檢查提示": st.column_config.TextColumn("檢查提示", disabled=True, width="medium"),
+            },
+            key="ai_review_editor"
+        )
 
-    with add_ai_col:
-        if st.button("把AI草稿加入組別", use_container_width=True):
-            draft_lines = [
-                line.strip()
-                for line in st.session_state["ai_draft_text"].split("\n")
-                if line.strip()
-            ]
+        with st.expander("查看 / 編輯原始多行草稿", expanded=False):
+            ai_draft_text = st.text_area(
+                "原始AI草稿",
+                value=st.session_state.get("ai_draft_text", ""),
+                height=160,
+                label_visibility="collapsed",
+                placeholder="AI辨識結果會出現在這裡。"
+            )
 
-            if not draft_lines:
-                st.warning("AI草稿是空的，請先辨識或手動輸入。")
-            else:
-                draft_errors = ai_draft_lines_have_errors(draft_lines)
-
-                if draft_errors:
-                    st.error("AI草稿還有問題，請先修正：")
-                    for error in draft_errors:
-                        st.write(error)
-                else:
-                    st.session_state["lines"].extend(draft_lines)
-                    st.session_state["calculate_clicked"] = False
-                    st.success("已把 AI 草稿加入組別，請在『已加入組別』再檢查一次。")
+            update_raw_col, _ = st.columns([1, 2], gap="small")
+            with update_raw_col:
+                if st.button("更新核對表", use_container_width=True):
+                    st.session_state["ai_draft_text"] = ai_draft_text
                     st.rerun()
 
-    with clear_ai_col:
-        if st.button("清空AI草稿", use_container_width=True):
-            st.session_state["ai_draft_text"] = ""
-            st.rerun()
+        add_ai_col, clear_ai_col = st.columns(2, gap="small")
+
+        with add_ai_col:
+            if st.button("加入已勾選草稿", use_container_width=True):
+                selected_lines = []
+
+                for row in edited_ai_rows:
+                    if row.get("加入"):
+                        content = str(row.get("草稿內容", "")).strip()
+                        if content:
+                            selected_lines.append(content)
+
+                if not selected_lines:
+                    st.warning("目前沒有勾選任何草稿。")
+                else:
+                    draft_errors = ai_draft_lines_have_errors(selected_lines)
+
+                    if draft_errors:
+                        st.error("AI草稿還有問題，請先修正：")
+                        for error in draft_errors:
+                            st.write(error)
+                    else:
+                        st.session_state["lines"].extend(selected_lines)
+                        st.session_state["calculate_clicked"] = False
+                        st.success("已把勾選的 AI 草稿加入組別，請在『已加入組別』再檢查一次。")
+                        st.rerun()
+
+        with clear_ai_col:
+            if st.button("清空AI草稿", use_container_width=True):
+                st.session_state["ai_draft_text"] = ""
+                if "ai_review_editor" in st.session_state:
+                    del st.session_state["ai_review_editor"]
+                st.rerun()
 
 
 # ===== 新增一組 =====
