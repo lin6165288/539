@@ -3,6 +3,8 @@ import math
 import re
 import itertools
 import base64
+import time
+from io import BytesIO
 
 st.set_page_config(
     page_title="539 快速計算器",
@@ -842,7 +844,50 @@ def normalize_ai_draft_text(text):
     return "\n".join(cleaned_lines)
 
 
-def recognize_lottery_image_with_gemini(uploaded_file):
+AI_CROP_AREAS = {
+    "整張": (0.00, 0.00, 1.00, 1.00),
+    "左上": (0.00, 0.00, 0.40, 0.38),
+    "上方": (0.25, 0.00, 0.75, 0.38),
+    "右上": (0.60, 0.00, 1.00, 0.38),
+    "左中": (0.00, 0.28, 0.42, 0.72),
+    "中間": (0.25, 0.25, 0.78, 0.75),
+    "右中": (0.58, 0.25, 1.00, 0.78),
+    "左下": (0.00, 0.62, 0.45, 1.00),
+    "下方": (0.20, 0.60, 0.80, 1.00),
+    "右下": (0.55, 0.60, 1.00, 1.00),
+}
+
+
+def crop_uploaded_image(uploaded_file, crop_area_name):
+    """依照使用者選擇的照片區域裁切，回傳裁切後 bytes 與 mime_type。"""
+    try:
+        from PIL import Image
+    except Exception:
+        return uploaded_file.getvalue(), uploaded_file.type or "image/jpeg", "找不到 Pillow，暫時改用整張圖片辨識。"
+
+    image_bytes = uploaded_file.getvalue()
+    mime_type = uploaded_file.type or "image/jpeg"
+
+    if crop_area_name not in AI_CROP_AREAS or crop_area_name == "整張":
+        return image_bytes, mime_type, ""
+
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    width, height = image.size
+    left_p, top_p, right_p, bottom_p = AI_CROP_AREAS[crop_area_name]
+
+    left = int(width * left_p)
+    top = int(height * top_p)
+    right = int(width * right_p)
+    bottom = int(height * bottom_p)
+
+    cropped = image.crop((left, top, right, bottom))
+
+    output = BytesIO()
+    cropped.save(output, format="JPEG", quality=95)
+    return output.getvalue(), "image/jpeg", ""
+
+
+def recognize_lottery_image_with_gemini(image_bytes, mime_type="image/jpeg", crop_area_name="整張"):
     """使用 Gemini API 辨識圖片，輸出可人工核對的文字草稿。"""
     try:
         from google import genai
@@ -858,11 +903,11 @@ def recognize_lottery_image_with_gemini(uploaded_file):
     if not api_key:
         return "", "找不到 GEMINI_API_KEY，請確認 Streamlit Secrets 已設定。"
 
-    image_bytes = uploaded_file.getvalue()
-    mime_type = uploaded_file.type or "image/jpeg"
-
-    prompt = """
+    prompt = f"""
 你正在辨識台灣539手寫彩券草稿。
+
+重要：這次只辨識圖片中的「{crop_area_name}」這一塊，不要推測照片其他區域。
+如果這一塊裡有多個彼此分開、上下左右不連續的下注區塊，請分成多行；但最多輸出 5 行。
 
 請只輸出可供程式解析的文字，不要解釋，不要加表格，不要加項目符號。
 
@@ -876,36 +921,46 @@ def recognize_lottery_image_with_gemini(uploaded_file):
    上方 => 01 02 03 04 05 二x1 三x0 四x0 車x0
 7. 分區交叉格式：
    中間 => 01 02 03 | 04 05 06 | 07 08 二x0.1 三x0.1 四x0 車x0
-8. 如果看到 X、x、×、分區、括號或明顯分成多群號碼，請用 | 分隔。
-9. 倍率可能有二、三、四、車，例如 二x0.1、三x1、四x0、車x0.3。
-10. 如果圖片寫「二三x0.1」，代表「二x0.1 三x0.1」；請務必展開輸出，不要保留二三x0.1。
-11. 如果圖片寫「二三四x0.1」，代表「二x0.1 三x0.1 四x0.1」；請務必展開輸出。
+8. 如果看到 X、x、×、括號、三欄排列、或明顯分成多群號碼，請用 | 分隔不同群。不要把直欄與橫排硬混在一起。
+9. 如果一個下注區塊旁邊寫的是「二三x0.1」或「==x0.1」，通常代表二星與三星都 x0.1，請輸出成：二x0.1 三x0.1 四x0 車x0。
+10. 如果圖片寫「二三四x0.1」，代表「二x0.1 三x0.1 四x0.1」。
+11. 如果只看到「=x1」且沒有看到二、三、四，通常先判斷為二x1 三x0 四x0 車x0；如果旁邊有三條等號或寫三，才判斷三星。
 12. 如果某個星別沒有看到倍率，請補成 0，例如 二x0 三x0 四x0 車x0。
 13. 看不清楚的數字請用 ?，不要猜。
-14. 不要輸出任何說明文字。
+14. 寧可少輸出，也不要把不同下注區塊混在同一行。
+15. 不要輸出任何說明文字。
 """.strip()
 
-    try:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                prompt,
-            ],
-        )
+    last_error = ""
 
-        ai_text = getattr(response, "text", "") or ""
-        ai_text = normalize_ai_draft_text(ai_text)
+    for attempt, wait_seconds in enumerate([0, 2, 5], start=1):
+        if wait_seconds:
+            time.sleep(wait_seconds)
 
-        if not ai_text:
-            return "", "AI 沒有回傳可用文字，請換一張更清楚的照片或重新拍攝。"
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    prompt,
+                ],
+            )
 
-        return ai_text, ""
+            ai_text = getattr(response, "text", "") or ""
+            ai_text = normalize_ai_draft_text(ai_text)
 
-    except Exception as e:
-        return "", f"Gemini 辨識失敗：{e}"
+            if not ai_text:
+                return "", "AI 沒有回傳可用文字，請換一張更清楚的照片或重新拍攝。"
 
+            return ai_text, ""
+
+        except Exception as e:
+            last_error = str(e)
+            if "503" not in last_error and "UNAVAILABLE" not in last_error.upper():
+                break
+
+    return "", f"Gemini 辨識失敗：{last_error}"
 
 def ai_draft_lines_have_errors(lines):
     errors = []
@@ -1095,21 +1150,44 @@ with st.expander("📷 照片參考", expanded=False):
 # ===== AI 辨識區 =====
 
 with st.expander("🤖 AI辨識圖片文字", expanded=False):
-    st.caption("AI 只會產生草稿。現在改成表格核對：每一筆會顯示照片位置、草稿內容與檢查提示。")
+    st.caption("建議不要整張辨識。請先選一小塊區域，AI 只產生草稿，你再人工核對後加入。")
 
     if uploaded_file is None:
         st.info("請先在上方『照片參考』上傳圖片。")
     else:
-        st.warning("手寫辨識可能會看錯，加入前一定要人工核對。")
+        st.warning("手寫整張辨識容易把上下左右搞混。建議一次只辨識一小區，例如左上、中間、右下。")
 
-        if st.button("AI辨識圖片", use_container_width=True):
-            with st.spinner("AI 辨識中，請稍等..."):
-                ai_text, ai_error = recognize_lottery_image_with_gemini(uploaded_file)
+        ai_area = st.selectbox(
+            "選擇AI要辨識的照片區域",
+            list(AI_CROP_AREAS.keys()),
+            index=0,
+            help="如果整張照片很複雜，請不要選整張，改選左上、上方、右上等局部區域。"
+        )
+
+        cropped_bytes, cropped_mime_type, crop_warning = crop_uploaded_image(uploaded_file, ai_area)
+
+        if crop_warning:
+            st.warning(crop_warning)
+
+        with st.expander("預覽AI實際辨識範圍", expanded=True):
+            st.image(cropped_bytes, caption=f"AI 只會看這一塊：{ai_area}", use_container_width=True)
+
+        if st.button("AI辨識這個區域", use_container_width=True):
+            with st.spinner("AI 辨識中，請稍等... 如果遇到忙線會自動重試。"):
+                ai_text, ai_error = recognize_lottery_image_with_gemini(
+                    cropped_bytes,
+                    cropped_mime_type,
+                    ai_area
+                )
 
             if ai_error:
                 st.error(ai_error)
             else:
-                st.session_state["ai_draft_text"] = ai_text
+                old_text = st.session_state.get("ai_draft_text", "").strip()
+                if old_text:
+                    st.session_state["ai_draft_text"] = old_text + "\n" + ai_text
+                else:
+                    st.session_state["ai_draft_text"] = ai_text
                 st.success("AI 已產生草稿，請在下方表格逐筆核對。")
                 st.rerun()
 
@@ -1119,7 +1197,7 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
         st.info("AI辨識後，草稿會整理成表格出現在這裡。")
     else:
         st.markdown("#### AI核對表")
-        st.caption("『照片位置』是 AI 判斷的大概位置；請主要核對『草稿內容』。不想加入的那筆，把『加入』取消勾選。")
+        st.caption("請主要核對『草稿內容』。不想加入的那筆，把『加入』取消勾選；看錯的地方可以直接在表格內修改。")
 
         edited_ai_rows = st.data_editor(
             ai_review_rows,
@@ -1167,7 +1245,7 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                             selected_lines.append(content)
 
                 if not selected_lines:
-                    st.warning("目前沒有勾選任何草稿。")
+                    st.warning("請至少勾選一筆草稿。")
                 else:
                     draft_errors = ai_draft_lines_have_errors(selected_lines)
 
@@ -1177,15 +1255,12 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                             st.write(error)
                     else:
                         st.session_state["lines"].extend(selected_lines)
-                        st.session_state["calculate_clicked"] = False
                         st.success("已把勾選的 AI 草稿加入組別，請在『已加入組別』再檢查一次。")
                         st.rerun()
 
         with clear_ai_col:
             if st.button("清空AI草稿", use_container_width=True):
                 st.session_state["ai_draft_text"] = ""
-                if "ai_review_editor" in st.session_state:
-                    del st.session_state["ai_review_editor"]
                 st.rerun()
 
 
