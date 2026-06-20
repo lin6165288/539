@@ -1188,6 +1188,84 @@ def ai_draft_review_rows(text):
     return rows
 
 
+def split_ai_draft_lines(text):
+    text = text.replace("\\n", "\n")
+    return [
+        normalize_combined_multipliers(line.strip())
+        for line in text.split("\n")
+        if line.strip()
+    ]
+
+
+def clear_ai_line_input_keys():
+    for key in list(st.session_state.keys()):
+        if key.startswith("ai_line_input_"):
+            del st.session_state[key]
+
+
+def set_ai_draft_lines(lines):
+    cleaned_lines = [
+        normalize_combined_multipliers(str(line).strip())
+        for line in lines
+        if str(line).strip()
+    ]
+    joined = "\n".join(cleaned_lines)
+    st.session_state["ai_draft_lines"] = cleaned_lines
+    st.session_state["ai_draft_text"] = joined
+    st.session_state["ai_draft_text_editor"] = joined
+    clear_ai_line_input_keys()
+
+
+def validate_single_ai_line(line):
+    line = normalize_combined_multipliers(line.strip())
+    errors = []
+
+    if not line:
+        errors.append("空白行")
+        return errors
+
+    if "?" in line:
+        errors.append("含有 ?，請先人工確認。")
+        return errors
+
+    parsed = parse_line(line)
+
+    if parsed["invalid_numbers"]:
+        errors.append(
+            "錯誤號碼：" + "、".join(str(num) for num in parsed["invalid_numbers"])
+        )
+
+    duplicates = manual_line_has_cross_duplicate(line)
+    for num, first_group, second_group in duplicates:
+        errors.append(f"{num:02d} 同時出現在第 {first_group} 區與第 {second_group} 區。")
+
+    if len(parsed["numbers"]) == 0:
+        errors.append("沒有辨識到有效號碼。")
+
+    return errors
+
+
+def get_ai_line_review_dict(line, line_index=1):
+    rows = ai_draft_review_rows(line)
+    if rows:
+        row = rows[0]
+        row["行"] = line_index
+        return row
+
+    return {
+        "行": line_index,
+        "模式": "-",
+        "號碼": "",
+        "分區": "",
+        "二": 0,
+        "三": 0,
+        "四": 0,
+        "車": 0,
+        "檢查": "空白行",
+        "草稿原文": line,
+    }
+
+
 
 # ===== Session State =====
 
@@ -1226,6 +1304,9 @@ if "ai_draft_text" not in st.session_state:
 
 if "ai_draft_text_editor" not in st.session_state:
     st.session_state["ai_draft_text_editor"] = ""
+
+if "ai_draft_lines" not in st.session_state:
+    st.session_state["ai_draft_lines"] = []
 
 for key in GROUP_KEYS:
     if key not in st.session_state:
@@ -1289,13 +1370,12 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                 with st.spinner("AI辨識中，請稍候..."):
                     ai_text = recognize_lottery_image_with_gemini(uploaded_file, "整張")
 
-                st.session_state["ai_draft_text"] = ai_text
-                st.session_state["ai_draft_text_editor"] = ai_text
-                st.success("AI辨識完成，請先核對草稿。")
+                set_ai_draft_lines(split_ai_draft_lines(ai_text))
+                st.success("AI辨識完成，請先逐行確認。")
             except Exception as exc:
                 st.error(str(exc))
 
-        st.caption("下面這個草稿框可以直接手動編輯、修正，再加入組別。若本來應該是分區交叉，請確認有用 | 分隔各區。")
+        st.caption("下面這個草稿框可以直接手動編輯、修正。你也可以把草稿拆成一行一行確認，OK 的就加入組別，不 OK 的就修改或刪除。")
         ai_draft_text = st.text_area(
             "AI辨識草稿（可直接編輯）",
             key="ai_draft_text_editor",
@@ -1308,45 +1388,90 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
         ai_draft_text = ai_draft_text.replace("\\n", "\n")
         st.session_state["ai_draft_text"] = ai_draft_text
 
+        sync_ai_col, clear_ai_col = st.columns(2, gap="small")
+
+        with sync_ai_col:
+            if st.button("依草稿文字更新逐行清單", use_container_width=True):
+                set_ai_draft_lines(split_ai_draft_lines(st.session_state["ai_draft_text"]))
+                st.success("已根據草稿文字更新逐行清單。")
+                st.rerun()
+
+        with clear_ai_col:
+            if st.button("清空AI草稿", use_container_width=True):
+                set_ai_draft_lines([])
+                st.rerun()
+
+        if st.session_state["ai_draft_lines"]:
+            st.markdown("#### 逐行確認")
+            st.caption("每一行都可以單獨確認。OK 的就直接加入組別；不 OK 的可先修改後儲存，或直接刪除。")
+
+            for line_index, original_line in enumerate(st.session_state["ai_draft_lines"], start=1):
+                line_key = f"ai_line_input_{line_index}"
+
+                if line_key not in st.session_state:
+                    st.session_state[line_key] = original_line
+
+                with st.container(border=True):
+                    st.markdown(f"**第 {line_index} 行**")
+
+                    edited_line = st.text_input(
+                        f"第 {line_index} 行內容",
+                        key=line_key,
+                        label_visibility="collapsed"
+                    )
+
+                    review = get_ai_line_review_dict(edited_line, line_index)
+
+                    st.caption(
+                        f"模式：{review['模式']}｜號碼：{review['號碼'] or '—'}｜"
+                        f"分區：{review['分區'] or '—'}｜"
+                        f"二：{review['二']} 三：{review['三']} 四：{review['四']} 車：{review['車']}｜"
+                        f"檢查：{review['檢查']}"
+                    )
+
+                    edit_col, add_col, delete_col = st.columns(3, gap="small")
+
+                    with edit_col:
+                        if st.button("儲存修改", key=f"save_ai_line_{line_index}", use_container_width=True):
+                            updated_lines = list(st.session_state["ai_draft_lines"])
+                            updated_lines[line_index - 1] = normalize_combined_multipliers(edited_line.strip())
+                            set_ai_draft_lines(updated_lines)
+                            st.success(f"第 {line_index} 行已更新。")
+                            st.rerun()
+
+                    with add_col:
+                        if st.button("加入組別", key=f"add_ai_line_{line_index}", use_container_width=True):
+                            current_line = normalize_combined_multipliers(edited_line.strip())
+                            errors = validate_single_ai_line(current_line)
+
+                            if errors:
+                                st.error("；".join(errors))
+                            else:
+                                st.session_state["lines"].append(current_line)
+                                st.session_state["calculate_clicked"] = False
+                                updated_lines = list(st.session_state["ai_draft_lines"])
+                                del updated_lines[line_index - 1]
+                                set_ai_draft_lines(updated_lines)
+                                st.success(f"第 {line_index} 行已加入組別。")
+                                st.rerun()
+
+                    with delete_col:
+                        if st.button("刪除這行", key=f"delete_ai_line_{line_index}", use_container_width=True):
+                            updated_lines = list(st.session_state["ai_draft_lines"])
+                            del updated_lines[line_index - 1]
+                            set_ai_draft_lines(updated_lines)
+                            st.success(f"第 {line_index} 行已刪除。")
+                            st.rerun()
+
         if st.session_state["ai_draft_text"].strip():
             st.markdown("#### AI草稿核對表")
-            st.caption("先看這張表核對號碼、分區與倍率；需要修改時，直接改上方草稿文字。")
+            st.caption("這是整份草稿的總覽；真正操作請用上面的逐行確認。")
             st.dataframe(
                 ai_draft_review_rows(st.session_state["ai_draft_text"]),
                 use_container_width=True,
                 hide_index=True
             )
 
-        add_ai_col, clear_ai_col = st.columns(2, gap="small")
-
-        with add_ai_col:
-            if st.button("把AI草稿加入組別", use_container_width=True):
-                draft_lines = [
-                    normalize_combined_multipliers(line.strip())
-                    for line in st.session_state["ai_draft_text"].split("\n")
-                    if line.strip()
-                ]
-
-                if not draft_lines:
-                    st.warning("AI草稿是空的。")
-                else:
-                    errors = validate_ai_draft_lines(draft_lines)
-
-                    if errors:
-                        st.error("AI草稿有問題，請先修正：")
-                        for error in errors:
-                            st.write(error)
-                    else:
-                        st.session_state["lines"].extend(draft_lines)
-                        st.session_state["calculate_clicked"] = False
-                        st.success("已把 AI 草稿加入組別。")
-                        st.rerun()
-
-        with clear_ai_col:
-            if st.button("清空AI草稿", use_container_width=True):
-                st.session_state["ai_draft_text"] = ""
-                st.session_state["ai_draft_text_editor"] = ""
-                st.rerun()
 
 
 # ===== 新增一組 =====
