@@ -3,8 +3,6 @@ import math
 import re
 import itertools
 import base64
-import time
-from io import BytesIO
 
 st.set_page_config(
     page_title="539 快速計算器",
@@ -210,6 +208,40 @@ def parse_numbers(text):
     return unique_numbers, invalid_numbers, duplicate_count
 
 
+def normalize_combined_multipliers(line):
+    """
+    支援手寫/輸入簡寫：
+    二三x0.1 = 二x0.1 三x0.1
+    二三四x0.1 = 二x0.1 三x0.1 四x0.1
+    23x0.1 = 二x0.1 三x0.1
+    234x0.1 = 二x0.1 三x0.1 四x0.1
+    """
+    mapping = {
+        "二": "二",
+        "三": "三",
+        "四": "四",
+        "2": "二",
+        "3": "三",
+        "4": "四",
+    }
+
+    pattern = r"([二三四234]{2,3})\s*[xX×]\s*(\d+(?:\.\d+)?)"
+
+    def repl(match):
+        stars_raw = match.group(1)
+        value = match.group(2)
+
+        stars = []
+        for ch in stars_raw:
+            star = mapping.get(ch)
+            if star and star not in stars:
+                stars.append(star)
+
+        return " ".join(f"{star}x{value}" for star in stars)
+
+    return re.sub(pattern, repl, line)
+
+
 def cross_group_count(groups, star):
     if len(groups) < star:
         return 0
@@ -269,7 +301,7 @@ def parse_multiplier(line, star_patterns):
 
 def parse_line(line):
     original_line = line
-    line = expand_combined_star_multipliers(line)
+    line = normalize_combined_multipliers(line)
 
     two_multiplier, line = parse_multiplier(line, ["二", "2"])
     three_multiplier, line = parse_multiplier(line, ["三", "3"])
@@ -582,8 +614,6 @@ def get_next_redeem_ticket_name():
     """
     兌獎區的「第幾張」是依照每次按下開始計算來編號，
     不是依照同一次計算裡有幾行組別來編號。
-    例如：第 1 次開始計算有 1 行 => 第1張
-          第 2 次開始計算有 2 行 => 兩行都算第2張
     """
     existing_names = []
 
@@ -783,295 +813,6 @@ def redeem_result_summary_by_ticket(winning_numbers):
     return rows
 
 
-
-
-def expand_combined_star_multipliers(text):
-    """
-    將「二三x0.1」這種簡寫展開成「二x0.1 三x0.1」。
-    例如：
-    二三x0.1 => 二x0.1 三x0.1
-    二三四x0.2 => 二x0.2 三x0.2 四x0.2
-    23x0.1 => 二x0.1 三x0.1
-    """
-    if not text:
-        return ""
-
-    star_map = {
-        "二": "二",
-        "三": "三",
-        "四": "四",
-        "2": "二",
-        "3": "三",
-        "4": "四",
-    }
-
-    def repl(match):
-        stars_raw = match.group(1)
-        value = match.group(2)
-        expanded = []
-
-        for ch in stars_raw:
-            if ch in star_map:
-                star = star_map[ch]
-                if star not in expanded:
-                    expanded.append(star)
-
-        return " ".join(f"{star}x{value}" for star in expanded)
-
-    # 支援：二三x0.1、二 三x0.1、二、三x0.1、23x0.1、2 3x0.1
-    pattern = r"((?:[二三四234][\s、,，]*){2,4})\s*[xX×]\s*(\d+(?:\.\d+)?)"
-    return re.sub(pattern, repl, text)
-
-def normalize_ai_draft_text(text):
-    """把 AI 回傳整理成 app 可解析的草稿格式。"""
-    if not text:
-        return ""
-
-    text = text.strip()
-    text = text.replace("```text", "").replace("```", "")
-    text = text.replace("×", "x").replace("X", "x")
-    text = text.replace("，", " ").replace("、", " ").replace(",", " ")
-    text = text.replace("；", "\n").replace(";", "\n")
-    text = expand_combined_star_multipliers(text)
-
-    cleaned_lines = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        cleaned_lines.append(line)
-
-    return "\n".join(cleaned_lines)
-
-
-AI_CROP_AREAS = {
-    "整張": (0.00, 0.00, 1.00, 1.00),
-    "左上": (0.00, 0.00, 0.40, 0.38),
-    "上方": (0.25, 0.00, 0.75, 0.38),
-    "右上": (0.60, 0.00, 1.00, 0.38),
-    "左中": (0.00, 0.28, 0.42, 0.72),
-    "中間": (0.25, 0.25, 0.78, 0.75),
-    "右中": (0.58, 0.25, 1.00, 0.78),
-    "左下": (0.00, 0.62, 0.45, 1.00),
-    "下方": (0.20, 0.60, 0.80, 1.00),
-    "右下": (0.55, 0.60, 1.00, 1.00),
-}
-
-
-def crop_uploaded_image(uploaded_file, crop_area_name):
-    """依照使用者選擇的照片區域裁切，回傳裁切後 bytes 與 mime_type。"""
-    try:
-        from PIL import Image
-    except Exception:
-        return uploaded_file.getvalue(), uploaded_file.type or "image/jpeg", "找不到 Pillow，暫時改用整張圖片辨識。"
-
-    image_bytes = uploaded_file.getvalue()
-    mime_type = uploaded_file.type or "image/jpeg"
-
-    if crop_area_name not in AI_CROP_AREAS or crop_area_name == "整張":
-        return image_bytes, mime_type, ""
-
-    image = Image.open(BytesIO(image_bytes)).convert("RGB")
-    width, height = image.size
-    left_p, top_p, right_p, bottom_p = AI_CROP_AREAS[crop_area_name]
-
-    left = int(width * left_p)
-    top = int(height * top_p)
-    right = int(width * right_p)
-    bottom = int(height * bottom_p)
-
-    cropped = image.crop((left, top, right, bottom))
-
-    output = BytesIO()
-    cropped.save(output, format="JPEG", quality=95)
-    return output.getvalue(), "image/jpeg", ""
-
-
-def recognize_lottery_image_with_gemini(image_bytes, mime_type="image/jpeg", crop_area_name="整張"):
-    """使用 Gemini API 辨識圖片，輸出可人工核對的文字草稿。"""
-    try:
-        from google import genai
-        from google.genai import types
-    except Exception:
-        return "", "找不到 google-genai 套件，請確認 requirements.txt 已加入 google-genai，並重新部署。"
-
-    try:
-        api_key = st.secrets.get("GEMINI_API_KEY", "")
-    except Exception:
-        api_key = ""
-
-    if not api_key:
-        return "", "找不到 GEMINI_API_KEY，請確認 Streamlit Secrets 已設定。"
-
-    prompt = f"""
-你正在辨識台灣539手寫彩券草稿。
-
-重要：這次只辨識圖片中的「{crop_area_name}」這一塊，不要推測照片其他區域。
-如果這一塊裡有多個彼此分開、上下左右不連續的下注區塊，請分成多行；但最多輸出 5 行。
-
-請只輸出可供程式解析的文字，不要解釋，不要加表格，不要加項目符號。
-
-輸出規則：
-1. 每一組一行。
-2. 每一行都要先標示你判斷它在照片中的大約位置，格式固定為：位置 => 內容
-3. 位置只能使用下列詞之一：左上、上方、中上、右上、左中、中間、右中、左下、下方、右下、位置不確定。
-4. 不要使用第1、第2、1、2、①、② 等編號，避免程式誤判成號碼。
-5. 號碼一律輸出兩位數，例如 1 要寫成 01。
-6. 一般組合格式：
-   上方 => 01 02 03 04 05 二x1 三x0 四x0 車x0
-7. 分區交叉格式：
-   中間 => 01 02 03 | 04 05 06 | 07 08 二x0.1 三x0.1 四x0 車x0
-8. 手寫方向可能是「橫向」也可能是「縱向」，請你自己判斷每一個下注區塊的閱讀方向，不要固定只用左到右或上到下。
-9. 判斷一個下注區塊時，先找底線、空白間隔、倍率記號（例如 =x1、==x0.1、二三x0.1、車x0.3）來界定範圍；不要把不相干的上下左右區塊混在同一行。
-10. 如果號碼是直向排列，請把同一個直欄從上到下讀成同一組號碼。例如直欄 01/03/11/13 就輸出 01 03 11 13。
-11. 如果有多個直欄，且直欄之間有 x、X、×、括號或明顯交叉符號，代表分區交叉，請用 | 分隔。例如左直欄 21 31 24，中直欄 04 14，右直欄 30 38 37，要輸出 21 31 24 | 04 14 | 30 38 37。
-12. 如果是橫向寫法，例如 14 x 20 39 x 09 28 ==x0.3，請輸出成 14 | 20 39 | 09 28 二x0.3 三x0.3 四x0 車x0。
-13. 如果是橫向寫法，例如 15 38 39 ==三x0.5，代表一般組合，請輸出 15 38 39 二x0 三x0.5 四x0 車x0。
-14. 如果一個下注區塊旁邊寫的是「二三x0.1」、「23x0.1」或「==x0.1」，通常代表二星與三星都 x0.1，請輸出成：二x0.1 三x0.1 四x0 車x0。
-15. 如果圖片寫「二三四x0.1」或「234x0.1」，代表「二x0.1 三x0.1 四x0.1」。
-16. 如果只看到「=x1」且沒有看到二、三、四，通常先判斷為二x1 三x0 四x0 車x0；如果旁邊有三、三條等號、或寫 ==三，才判斷為三星。
-17. 如果某個星別沒有看到倍率，請補成 0，例如 二x0 三x0 四x0 車x0。
-18. 看不清楚的數字請用 ?，不要猜。
-19. 寧可少輸出，也不要把不同下注區塊混在同一行。
-20. 不要輸出任何說明文字。
-""".strip()
-
-    last_error = ""
-
-    for attempt, wait_seconds in enumerate([0, 2, 5], start=1):
-        if wait_seconds:
-            time.sleep(wait_seconds)
-
-        try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=[
-                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                    prompt,
-                ],
-            )
-
-            ai_text = getattr(response, "text", "") or ""
-            ai_text = normalize_ai_draft_text(ai_text)
-
-            if not ai_text:
-                return "", "AI 沒有回傳可用文字，請換一張更清楚的照片或重新拍攝。"
-
-            return ai_text, ""
-
-        except Exception as e:
-            last_error = str(e)
-            if "503" not in last_error and "UNAVAILABLE" not in last_error.upper():
-                break
-
-    return "", f"Gemini 辨識失敗：{last_error}"
-
-def ai_draft_lines_have_errors(lines):
-    errors = []
-
-    for line_index, line in enumerate(lines, start=1):
-        if "?" in line:
-            errors.append(f"AI草稿第 {line_index} 行有 ?，代表 AI 看不清楚，請先手動修正。")
-
-        parsed = parse_line(line)
-
-        if parsed["invalid_numbers"]:
-            errors.append(
-                f"AI草稿第 {line_index} 行有錯誤號碼：" +
-                "、".join(str(num) for num in parsed["invalid_numbers"])
-            )
-
-        duplicates = manual_line_has_cross_duplicate(line)
-        for num, first_group, second_group in duplicates:
-            errors.append(
-                f"AI草稿第 {line_index} 行：{num:02d} 同時出現在第 {first_group} 區與第 {second_group} 區。"
-            )
-
-    return errors
-
-
-AI_LOCATION_WORDS = [
-    "左上", "上方", "中上", "右上",
-    "左中", "中間", "右中",
-    "左下", "下方", "右下", "位置不確定"
-]
-
-
-def split_ai_location_and_content(line):
-    """將 AI 草稿拆成「照片位置」與「可加入組別的內容」。"""
-    line = (line or "").strip()
-    line = re.sub(r"^[\-\*\s]+", "", line)
-
-    default_location = "位置不確定"
-
-    for separator in ["=>", "＝>", "→", "：", ":"]:
-        if separator in line:
-            left, right = line.split(separator, 1)
-            left = left.strip()
-            right = right.strip()
-
-            # 位置欄不能有阿拉伯數字，避免「第1筆」被當成號碼
-            if not re.search(r"\d", left):
-                for word in AI_LOCATION_WORDS:
-                    if word in left:
-                        return word, right
-
-    return default_location, line
-
-
-def build_ai_review_rows(ai_text):
-    rows = []
-
-    for raw_line in ai_text.splitlines():
-        raw_line = raw_line.strip()
-        if not raw_line:
-            continue
-
-        location, content = split_ai_location_and_content(raw_line)
-        rows.append({
-            "加入": True,
-            "照片位置": location,
-            "草稿內容": content,
-            "檢查提示": summarize_ai_review_line(content),
-        })
-
-    return rows
-
-
-def summarize_ai_review_line(line):
-    if not line.strip():
-        return "空白"
-
-    warnings = []
-
-    if "?" in line:
-        warnings.append("有?待修正")
-
-    parsed = parse_line(line)
-
-    if parsed["invalid_numbers"]:
-        warnings.append("有錯誤號碼")
-
-    duplicates = manual_line_has_cross_duplicate(line)
-    if duplicates:
-        warnings.append("跨區重複")
-
-    mode = parsed["mode"]
-    number_count = len(parsed["numbers"])
-    multipliers = (
-        f"二{parsed['two_multiplier']:g} "
-        f"三{parsed['three_multiplier']:g} "
-        f"四{parsed['four_multiplier']:g} "
-        f"車{parsed['car_multiplier']:g}"
-    )
-
-    if warnings:
-        return f"⚠️ {'、'.join(warnings)}｜{mode}｜{number_count}碼｜{multipliers}"
-
-    return f"✅ {mode}｜{number_count}碼｜{multipliers}"
-
-
 # ===== Session State =====
 
 if "lines" not in st.session_state:
@@ -1103,9 +844,6 @@ if "need_reset_multipliers" not in st.session_state:
 
 if "redeem_tickets" not in st.session_state:
     st.session_state["redeem_tickets"] = []
-
-if "ai_draft_text" not in st.session_state:
-    st.session_state["ai_draft_text"] = ""
 
 for key in GROUP_KEYS:
     if key not in st.session_state:
@@ -1150,123 +888,6 @@ with st.expander("📷 照片參考", expanded=False):
             """,
             unsafe_allow_html=True
         )
-
-
-# ===== AI 辨識區 =====
-
-with st.expander("🤖 AI辨識圖片文字", expanded=False):
-    st.caption("建議不要整張辨識。請先選一小塊區域；AI 會自行判斷橫向或縱向書寫，但仍要人工核對。")
-
-    if uploaded_file is None:
-        st.info("請先在上方『照片參考』上傳圖片。")
-    else:
-        st.warning("手寫整張辨識容易把上下左右搞混。建議一次只辨識一小區；區塊內若有直向/橫向混寫，AI 會嘗試依底線、倍率與 X 符號判斷。")
-
-        ai_area = st.selectbox(
-            "選擇AI要辨識的照片區域",
-            list(AI_CROP_AREAS.keys()),
-            index=0,
-            help="如果整張照片很複雜，請不要選整張，改選左上、上方、右上等局部區域。"
-        )
-
-        cropped_bytes, cropped_mime_type, crop_warning = crop_uploaded_image(uploaded_file, ai_area)
-
-        if crop_warning:
-            st.warning(crop_warning)
-
-        with st.expander("預覽AI實際辨識範圍", expanded=True):
-            st.image(cropped_bytes, caption=f"AI 只會看這一塊：{ai_area}", use_container_width=True)
-
-        if st.button("AI辨識這個區域", use_container_width=True):
-            with st.spinner("AI 辨識中，請稍等... 如果遇到忙線會自動重試。"):
-                ai_text, ai_error = recognize_lottery_image_with_gemini(
-                    cropped_bytes,
-                    cropped_mime_type,
-                    ai_area
-                )
-
-            if ai_error:
-                st.error(ai_error)
-            else:
-                old_text = st.session_state.get("ai_draft_text", "").strip()
-                if old_text:
-                    st.session_state["ai_draft_text"] = old_text + "\n" + ai_text
-                else:
-                    st.session_state["ai_draft_text"] = ai_text
-                st.success("AI 已產生草稿，請在下方表格逐筆核對。")
-                st.rerun()
-
-    ai_review_rows = build_ai_review_rows(st.session_state.get("ai_draft_text", ""))
-
-    if not ai_review_rows:
-        st.info("AI辨識後，草稿會整理成表格出現在這裡。")
-    else:
-        st.markdown("#### AI核對表")
-        st.caption("請主要核對『草稿內容』。不想加入的那筆，把『加入』取消勾選；看錯的地方可以直接在表格內修改。")
-
-        edited_ai_rows = st.data_editor(
-            ai_review_rows,
-            use_container_width=True,
-            hide_index=True,
-            num_rows="fixed",
-            column_config={
-                "加入": st.column_config.CheckboxColumn("加入", help="勾選後才會加入組別", default=True),
-                "照片位置": st.column_config.TextColumn("照片位置", disabled=True, width="small"),
-                "草稿內容": st.column_config.TextColumn(
-                    "草稿內容",
-                    help="可以直接修改號碼、分區與倍率",
-                    width="large"
-                ),
-                "檢查提示": st.column_config.TextColumn("檢查提示", disabled=True, width="medium"),
-            },
-            key="ai_review_editor"
-        )
-
-        with st.expander("查看 / 編輯原始多行草稿", expanded=False):
-            ai_draft_text = st.text_area(
-                "原始AI草稿",
-                value=st.session_state.get("ai_draft_text", ""),
-                height=160,
-                label_visibility="collapsed",
-                placeholder="AI辨識結果會出現在這裡。"
-            )
-
-            update_raw_col, _ = st.columns([1, 2], gap="small")
-            with update_raw_col:
-                if st.button("更新核對表", use_container_width=True):
-                    st.session_state["ai_draft_text"] = ai_draft_text
-                    st.rerun()
-
-        add_ai_col, clear_ai_col = st.columns(2, gap="small")
-
-        with add_ai_col:
-            if st.button("加入已勾選草稿", use_container_width=True):
-                selected_lines = []
-
-                for row in edited_ai_rows:
-                    if row.get("加入"):
-                        content = str(row.get("草稿內容", "")).strip()
-                        if content:
-                            selected_lines.append(content)
-
-                if not selected_lines:
-                    st.warning("請至少勾選一筆草稿。")
-                else:
-                    draft_errors = ai_draft_lines_have_errors(selected_lines)
-
-                    if draft_errors:
-                        st.error("AI草稿還有問題，請先修正：")
-                        for error in draft_errors:
-                            st.write(error)
-                    else:
-                        st.session_state["lines"].extend(selected_lines)
-                        st.success("已把勾選的 AI 草稿加入組別，請在『已加入組別』再檢查一次。")
-                        st.rerun()
-
-        with clear_ai_col:
-            if st.button("清空AI草稿", use_container_width=True):
-                st.session_state["ai_draft_text"] = ""
-                st.rerun()
 
 
 # ===== 新增一組 =====
@@ -1500,7 +1121,6 @@ if st.session_state["calculate_clicked"]:
 
         if warning_items:
             st.warning("有些區塊出現重複號碼或錯誤號碼，請檢查詳細結果。")
-
 
 
 # ===== 兌獎區 =====
