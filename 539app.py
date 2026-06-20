@@ -270,7 +270,8 @@ def group_display(groups):
 
 
 def selected_to_text(nums):
-    return " ".join(f"{num:02d}" for num in sorted(nums))
+    # 依照點選順序顯示，不自動排序
+    return " ".join(f"{num:02d}" for num in nums)
 
 
 def get_filled_group_texts():
@@ -539,8 +540,9 @@ def render_number_pad(group_key):
     真正快速版號碼盤：
     用前端 HTML/JS 先在手機本機即時選號，不會每按一顆就讓 Streamlit 重跑。
     按「套用到目前編輯區」時，才一次寫回 Python。
+    這版改用 HTML form target="_parent" 送出，避免 iframe 裡改 parent location 沒反應。
     """
-    current_nums = sorted(st.session_state[group_key])
+    current_nums = list(st.session_state[group_key])
 
     other_num_owner = {}
     for other_group in GROUP_KEYS:
@@ -688,16 +690,22 @@ def render_number_pad(group_key):
             {buttons_html}
         </div>
 
+        <form id="applyForm" method="GET" target="_parent">
+            <input type="hidden" name="pad_submit" id="padSubmit" value="">
+            <input type="hidden" name="pad_group" id="padGroup" value="{group_key}">
+            <input type="hidden" name="pad_nums" id="padNums" value="">
+        </form>
+
         <div class="actions">
             <button type="button" class="apply-btn" id="applyBtn">套用到 {group_key}</button>
             <button type="button" class="clear-btn" id="clearBtn">清空</button>
         </div>
 
-        <div class="hint">橘色＝已選；灰色＝已在其他區，不能重複。點號碼不會重整，按套用才會更新。</div>
+        <div class="hint">橘色＝已選；灰色＝已在其他區。顯示順序＝點選順序。點號碼不會重整，按套用才會更新。</div>
 
         <script>
             const groupKey = "{group_key}";
-            let selected = new Set([{selected_js}].filter(x => x !== "").map(Number));
+            let selected = [{selected_js}].filter(x => x !== "").map(Number);
 
             const selectedDisplay = document.getElementById("selectedDisplay");
 
@@ -706,11 +714,10 @@ def render_number_pad(group_key):
             }}
 
             function updateDisplay() {{
-                const arr = Array.from(selected).sort((a, b) => a - b);
-                if (arr.length === 0) {{
+                if (selected.length === 0) {{
                     selectedDisplay.innerHTML = "<b>{group_key}</b> 目前尚未選號";
                 }} else {{
-                    selectedDisplay.innerHTML = "<b>{group_key}</b> 已選：" + arr.map(pad2).join(" ");
+                    selectedDisplay.innerHTML = "<b>{group_key}</b> 已選：" + selected.map(pad2).join(" ");
                 }}
             }}
 
@@ -719,12 +726,13 @@ def render_number_pad(group_key):
                     if (btn.disabled) return;
 
                     const num = Number(btn.dataset.num);
+                    const idx = selected.indexOf(num);
 
-                    if (selected.has(num)) {{
-                        selected.delete(num);
+                    if (idx >= 0) {{
+                        selected.splice(idx, 1);
                         btn.classList.remove("selected");
                     }} else {{
-                        selected.add(num);
+                        selected.push(num);
                         btn.classList.add("selected");
                     }}
 
@@ -733,7 +741,7 @@ def render_number_pad(group_key):
             }});
 
             document.getElementById("clearBtn").addEventListener("click", () => {{
-                selected.clear();
+                selected = [];
                 document.querySelectorAll(".pad-btn.selected").forEach(btn => {{
                     btn.classList.remove("selected");
                 }});
@@ -741,12 +749,10 @@ def render_number_pad(group_key):
             }});
 
             document.getElementById("applyBtn").addEventListener("click", () => {{
-                const arr = Array.from(selected).sort((a, b) => a - b);
-                const params = new URLSearchParams(window.parent.location.search);
-                params.set("pad_submit", String(Date.now()));
-                params.set("pad_group", groupKey);
-                params.set("pad_nums", arr.join(","));
-                window.parent.location.search = params.toString();
+                document.getElementById("padSubmit").value = String(Date.now());
+                document.getElementById("padGroup").value = groupKey;
+                document.getElementById("padNums").value = selected.join(",");
+                document.getElementById("applyForm").submit();
             }});
 
             updateDisplay();
@@ -1113,7 +1119,16 @@ if "pad_submit" in st.query_params:
             if 1 <= num <= 39:
                 new_nums.append(num)
 
-        new_nums = sorted(set(new_nums))
+        # 保留點選順序，並去掉重複
+        ordered_unique_nums = []
+        seen_nums = set()
+
+        for num in new_nums:
+            if num not in seen_nums:
+                ordered_unique_nums.append(num)
+                seen_nums.add(num)
+
+        new_nums = ordered_unique_nums
 
         blocked = []
         allowed = []
