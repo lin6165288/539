@@ -224,12 +224,22 @@ def parse_numbers(text):
 
 def normalize_combined_multipliers(line):
     """
-    支援簡寫：
-    二三x0.1 = 二x0.1 三x0.1
-    二三四x0.1 = 二x0.1 三x0.1 四x0.1
-    23x0.1 = 二x0.1 三x0.1
-    234x0.1 = 二x0.1 三x0.1 四x0.1
+    支援倍率簡寫：
+    2x0.1 = 二x0.1
+    3x0.1 = 三x0.1
+    4x0.1 = 四x0.1
+    23x0.1 / 二三x0.1 / ==x0.1 = 二x0.1 三x0.1
+    234x0.1 / 二三四x0.1 = 二x0.1 三x0.1 四x0.1
     """
+    line = line.replace("×", "x").replace("X", "x")
+
+    # 常見手寫：==x0.1、== x 0.1，代表二星和三星
+    line = re.sub(
+        r"={2,}\s*x\s*(\d+(?:\.\d+)?)",
+        r"二x\1 三x\1",
+        line
+    )
+
     mapping = {
         "二": "二",
         "三": "三",
@@ -239,9 +249,10 @@ def normalize_combined_multipliers(line):
         "4": "四",
     }
 
-    pattern = r"([二三四234]{2,3})\s*[xX×]\s*(\d+(?:\.\d+)?)"
+    # 先處理 23x0.1、234x0.1、二三x0.1、二三四x0.1
+    combined_pattern = r"(?<!\d)([二三四234]{2,3})\s*x\s*(\d+(?:\.\d+)?)"
 
-    def repl(match):
+    def combined_repl(match):
         stars_raw = match.group(1)
         value = match.group(2)
 
@@ -253,7 +264,19 @@ def normalize_combined_multipliers(line):
 
         return " ".join(f"{star}x{value}" for star in stars)
 
-    return re.sub(pattern, repl, line)
+    line = re.sub(combined_pattern, combined_repl, line)
+
+    # 再處理單一數字倍率 2x0.1、3x0.1、4x0.1
+    single_pattern = r"(?<!\d)([234])\s*x\s*(\d+(?:\.\d+)?)"
+
+    def single_repl(match):
+        star = mapping.get(match.group(1))
+        value = match.group(2)
+        return f"{star}x{value}"
+
+    line = re.sub(single_pattern, single_repl, line)
+
+    return line
 
 
 def cross_group_count(groups, star):
@@ -893,6 +916,9 @@ def clean_ai_output(text):
     # 移除 Markdown code fence
     text = text.replace("```text", "").replace("```", "").strip()
 
+    # Gemini 有時候會把換行輸出成字面上的 \n，先轉回真正換行
+    text = text.replace("\\n", "\n")
+
     cleaned_lines = []
 
     for line in text.splitlines():
@@ -901,8 +927,9 @@ def clean_ai_output(text):
         if not line:
             continue
 
-        # 移除 AI 可能輸出的項目符號
+        # 移除 AI 可能輸出的項目符號或編號
         line = re.sub(r"^[\\-•*]\\s*", "", line)
+        line = re.sub(r"^\\d+[\\.、\\)]\\s*", "", line)
 
         # 移除位置標籤，例如：左上 =>、中間：
         line = re.sub(r"^(左上|上方|右上|左中|中間|右中|左下|下方|右下|位置不確定)\\s*(=>|:|：)\\s*", "", line)
@@ -911,7 +938,7 @@ def clean_ai_output(text):
         line = line.replace("×", "x").replace("X", "x")
         line = re.sub(r"\\s+", " ", line)
 
-        # 展開 二三x0.1
+        # 展開 2x0.1、23x0.1、二三x0.1、==x0.1
         line = normalize_combined_multipliers(line)
 
         cleaned_lines.append(line)
@@ -946,15 +973,21 @@ def recognize_lottery_image_with_gemini(uploaded_file, crop_area_name):
 01 02 03 | 04 05 06 | 07 08 二x0.1 三x0.1 四x0 車x0
 
 重要規則：
-1. 每一組一行。
+1. 每一組一行，請輸出真正換行，不要輸出字面上的 \\n。
 2. 本圖片會以「橫式書寫」為主，請優先從左到右讀。
 3. 號碼只允許 01～39，請一律輸出兩位數。
 4. 如果同一行中有 x、X、× 分隔不同群號碼，請用 | 分隔。
-5. 例如「14 x 20 39 x 09 28 二三x0.3」要輸出：
+5. 倍率可能寫成：
+   2x0.1 = 二x0.1
+   3x0.1 = 三x0.1
+   4x0.1 = 四x0.1
+   23x0.1 / 二三x0.1 / ==x0.1 = 二x0.1 三x0.1
+   234x0.1 / 二三四x0.1 = 二x0.1 三x0.1 四x0.1
+6. 例如「14 x 20 39 x 09 28 23x0.3」要輸出：
    14 | 20 39 | 09 28 二x0.3 三x0.3 四x0 車x0
-6. 如果看到「二三x0.1」、「23x0.1」、「==x0.1」，代表二x0.1、三x0.1。
-7. 如果看到「二三四x0.1」、「234x0.1」，代表二x0.1、三x0.1、四x0.1。
-8. 如果沒有看到某星別倍率，請補 0，例如 三x0 四x0 車x0。
+7. 例如「12 14 27 21 31 03 4x0.1」要輸出：
+   12 14 27 21 31 03 二x0 三x0 四x0.1 車x0
+8. 如果沒有看到某星別倍率，請補 0，例如 二x0 三x0 四x0 車x0。
 9. 看不清楚請用 ?，不要猜。
 10. 不要把日期、539、6/20 這種標題當下注號碼。
 11. 不要輸出位置名稱、編號或說明文字。
@@ -1020,6 +1053,54 @@ def validate_ai_draft_lines(lines):
             errors.append(f"第 {line_index} 行沒有辨識到有效號碼。")
 
     return errors
+
+
+def ai_draft_review_rows(text):
+    rows = []
+
+    lines = [
+        normalize_combined_multipliers(line.strip())
+        for line in text.split("\n")
+        if line.strip()
+    ]
+
+    for line_index, line in enumerate(lines, start=1):
+        parsed = parse_line(line)
+
+        check_items = []
+
+        if "?" in line:
+            check_items.append("有?需確認")
+
+        if parsed["invalid_numbers"]:
+            check_items.append(
+                "錯誤號碼：" + "、".join(str(num) for num in parsed["invalid_numbers"])
+            )
+
+        duplicates = manual_line_has_cross_duplicate(line)
+        if duplicates:
+            check_items.append("跨區重複")
+
+        if len(parsed["numbers"]) == 0:
+            check_items.append("未辨識到號碼")
+
+        if not check_items:
+            check_items.append("OK")
+
+        rows.append({
+            "行": line_index,
+            "模式": parsed["mode"],
+            "號碼": "、".join(f"{num:02d}" for num in parsed["numbers"]),
+            "分區": group_display(parsed["groups"]),
+            "二": parsed["two_multiplier"],
+            "三": parsed["three_multiplier"],
+            "四": parsed["four_multiplier"],
+            "車": parsed["car_multiplier"],
+            "檢查": "；".join(check_items),
+            "草稿原文": line,
+        })
+
+    return rows
 
 
 
@@ -1133,6 +1214,15 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
         )
 
         st.session_state["ai_draft_text"] = ai_draft_text
+
+        if st.session_state["ai_draft_text"].strip():
+            st.markdown("#### AI草稿核對表")
+            st.caption("先看這張表核對號碼、分區與倍率；需要修改時，直接改上方草稿文字。")
+            st.dataframe(
+                ai_draft_review_rows(st.session_state["ai_draft_text"]),
+                use_container_width=True,
+                hide_index=True
+            )
 
         add_ai_col, clear_ai_col = st.columns(2, gap="small")
 
