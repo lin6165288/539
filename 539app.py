@@ -267,6 +267,7 @@ def parse_multiplier(line, star_patterns):
 
 def parse_line(line):
     original_line = line
+    line = expand_combined_star_multipliers(line)
 
     two_multiplier, line = parse_multiplier(line, ["二", "2"])
     three_multiplier, line = parse_multiplier(line, ["三", "3"])
@@ -781,6 +782,44 @@ def redeem_result_summary_by_ticket(winning_numbers):
 
 
 
+
+def expand_combined_star_multipliers(text):
+    """
+    將「二三x0.1」這種簡寫展開成「二x0.1 三x0.1」。
+    例如：
+    二三x0.1 => 二x0.1 三x0.1
+    二三四x0.2 => 二x0.2 三x0.2 四x0.2
+    23x0.1 => 二x0.1 三x0.1
+    """
+    if not text:
+        return ""
+
+    star_map = {
+        "二": "二",
+        "三": "三",
+        "四": "四",
+        "2": "二",
+        "3": "三",
+        "4": "四",
+    }
+
+    def repl(match):
+        stars_raw = match.group(1)
+        value = match.group(2)
+        expanded = []
+
+        for ch in stars_raw:
+            if ch in star_map:
+                star = star_map[ch]
+                if star not in expanded:
+                    expanded.append(star)
+
+        return " ".join(f"{star}x{value}" for star in expanded)
+
+    # 支援：二三x0.1、二 三x0.1、二、三x0.1、23x0.1、2 3x0.1
+    pattern = r"((?:[二三四234][\s、,，]*){2,4})\s*[xX×]\s*(\d+(?:\.\d+)?)"
+    return re.sub(pattern, repl, text)
+
 def normalize_ai_draft_text(text):
     """把 AI 回傳整理成 app 可解析的草稿格式。"""
     if not text:
@@ -791,6 +830,7 @@ def normalize_ai_draft_text(text):
     text = text.replace("×", "x").replace("X", "x")
     text = text.replace("，", " ").replace("、", " ").replace(",", " ")
     text = text.replace("；", "\n").replace(";", "\n")
+    text = expand_combined_star_multipliers(text)
 
     cleaned_lines = []
     for line in text.splitlines():
@@ -838,9 +878,11 @@ def recognize_lottery_image_with_gemini(uploaded_file):
    中間 => 01 02 03 | 04 05 06 | 07 08 二x0.1 三x0.1 四x0 車x0
 8. 如果看到 X、x、×、分區、括號或明顯分成多群號碼，請用 | 分隔。
 9. 倍率可能有二、三、四、車，例如 二x0.1、三x1、四x0、車x0.3。
-10. 如果某個星別沒有看到倍率，請補成 0，例如 二x0 三x0 四x0 車x0。
-11. 看不清楚的數字請用 ?，不要猜。
-12. 不要輸出任何說明文字。
+10. 如果圖片寫「二三x0.1」，代表「二x0.1 三x0.1」；請務必展開輸出，不要保留二三x0.1。
+11. 如果圖片寫「二三四x0.1」，代表「二x0.1 三x0.1 四x0.1」；請務必展開輸出。
+12. 如果某個星別沒有看到倍率，請補成 0，例如 二x0 三x0 四x0 車x0。
+13. 看不清楚的數字請用 ?，不要猜。
+14. 不要輸出任何說明文字。
 """.strip()
 
     try:
