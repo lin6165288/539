@@ -7,6 +7,7 @@ import io
 import time
 import json
 import os
+import html
 
 try:
     import mysql.connector
@@ -108,6 +109,50 @@ st.markdown(
         margin-bottom: 5px;
         font-size: 0.84rem;
         min-height: 48px;
+    }
+
+    .ai-line-text {
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin-top: 4px;
+        margin-bottom: 7px;
+        color: #0f172a;
+        font-size: 1rem;
+        font-weight: 700;
+        line-height: 1.45;
+        letter-spacing: 0.02em;
+        word-break: break-word;
+    }
+
+    .ai-summary {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 7px 9px;
+        margin-bottom: 7px;
+        color: #334155;
+        font-size: 0.82rem;
+        line-height: 1.45;
+    }
+
+    .ai-chip {
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        border-radius: 10px;
+        padding: 6px 4px;
+        text-align: center;
+        color: #9a3412;
+        font-size: 0.92rem;
+        font-weight: 800;
+        margin-bottom: 5px;
+    }
+
+    .ai-chip-zero {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        color: #64748b;
     }
 
     .sticky-photo {
@@ -1276,6 +1321,25 @@ def get_ai_line_review_dict(line, line_index=1):
     }
 
 
+def ai_chip_class(value):
+    try:
+        return "ai-chip" if float(value) > 0 else "ai-chip ai-chip-zero"
+    except Exception:
+        return "ai-chip ai-chip-zero"
+
+
+def format_ai_value(value):
+    try:
+        value = float(value)
+    except Exception:
+        return str(value)
+
+    if abs(value - round(value)) < 1e-9:
+        return str(int(round(value)))
+
+    return f"{value:g}"
+
+
 def format_multiplier_value(value):
     try:
         value = float(value)
@@ -1808,22 +1872,50 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
 
                     edited_line = original_line
 
-                    st.text_input(
-                        f"第 {line_index} 行內容",
-                        value=edited_line,
-                        key=line_key,
-                        label_visibility="collapsed",
-                        disabled=True
-                    )
-
                     review = get_ai_line_review_dict(edited_line, line_index)
 
-                    st.caption(
-                        f"模式：{review['模式']}｜號碼：{review['號碼'] or '—'}｜"
-                        f"分區：{review['分區'] or '—'}｜"
-                        f"二：{review['二']} 三：{review['三']} 四：{review['四']} 車：{review['車']}｜"
-                        f"檢查：{review['檢查']}"
+                    st.markdown(
+                        f'<div class="ai-line-text">{html.escape(edited_line)}</div>',
+                        unsafe_allow_html=True
                     )
+
+                    summary_text = (
+                        f"模式：{review['模式']}<br>"
+                        f"號碼：{html.escape(review['號碼'] or '—')}<br>"
+                        f"分區：{html.escape(review['分區'] or '—')}<br>"
+                        f"檢查：{html.escape(review['檢查'])}"
+                    )
+
+                    st.markdown(
+                        f'<div class="ai-summary">{summary_text}</div>',
+                        unsafe_allow_html=True
+                    )
+
+                    m2_col, m3_col, m4_col, car_col = st.columns(4, gap="small")
+
+                    with m2_col:
+                        st.markdown(
+                            f'<div class="{ai_chip_class(review["二"])}">二<br>{format_ai_value(review["二"])}</div>',
+                            unsafe_allow_html=True
+                        )
+
+                    with m3_col:
+                        st.markdown(
+                            f'<div class="{ai_chip_class(review["三"])}">三<br>{format_ai_value(review["三"])}</div>',
+                            unsafe_allow_html=True
+                        )
+
+                    with m4_col:
+                        st.markdown(
+                            f'<div class="{ai_chip_class(review["四"])}">四<br>{format_ai_value(review["四"])}</div>',
+                            unsafe_allow_html=True
+                        )
+
+                    with car_col:
+                        st.markdown(
+                            f'<div class="{ai_chip_class(review["車"])}">車<br>{format_ai_value(review["車"])}</div>',
+                            unsafe_allow_html=True
+                        )
 
                     edit_col, add_col, delete_col = st.columns(3, gap="small")
 
