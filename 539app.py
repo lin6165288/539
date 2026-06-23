@@ -1495,6 +1495,9 @@ if "pending_calculate_confirm" not in st.session_state:
 if "ticket_name_input" not in st.session_state:
     st.session_state["ticket_name_input"] = ""
 
+if "ticket_name_input_version" not in st.session_state:
+    st.session_state["ticket_name_input_version"] = 0
+
 if "ai_draft_text" not in st.session_state:
     st.session_state["ai_draft_text"] = ""
 
@@ -1860,9 +1863,12 @@ if st.session_state.get("pending_calculate_confirm", False):
     st.info("請輸入這次計算要儲存到兌獎區的票名。若不修改，會使用預設票名。")
 
     with st.container(border=True):
-        st.text_input(
+        ticket_input_key = f"ticket_name_input_{st.session_state.get('ticket_name_input_version', 0)}"
+
+        ticket_name_value = st.text_input(
             "票名",
-            key="ticket_name_input",
+            key=ticket_input_key,
+            value=st.session_state.get("ticket_name_input", ""),
             placeholder="例如：A1、第一張、6/20-1"
         )
 
@@ -1877,16 +1883,19 @@ if st.session_state.get("pending_calculate_confirm", False):
                     price_3,
                     price_4,
                     price_car,
-                    ticket_name=st.session_state.get("ticket_name_input", "")
+                    ticket_name=ticket_name_value
                 )
                 st.session_state["pending_calculate_confirm"] = False
                 st.session_state["ticket_name_input"] = ""
+                st.session_state["ticket_name_input_version"] = st.session_state.get("ticket_name_input_version", 0) + 1
                 st.success("已計算，並存入本次頁面的兌獎區。需要保留到下次開啟時，請到兌獎區按「儲存兌獎區」。")
                 st.rerun()
 
         with cancel_col:
             if st.button("取消", use_container_width=True):
                 st.session_state["pending_calculate_confirm"] = False
+                st.session_state["ticket_name_input"] = ""
+                st.session_state["ticket_name_input_version"] = st.session_state.get("ticket_name_input_version", 0) + 1
                 st.rerun()
 
 
