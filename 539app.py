@@ -5,6 +5,13 @@ import itertools
 import base64
 import io
 import time
+import json
+import os
+
+try:
+    import mysql.connector
+except Exception:
+    mysql = None
 
 try:
     from google import genai
@@ -1273,6 +1280,147 @@ def get_ai_line_review_dict(line, line_index=1):
 
 
 
+
+# ===== Railway 兌獎區儲存 =====
+
+REDEEM_STORAGE_TABLE = "lottery_redeem_state"
+REDEEM_STORAGE_ID = 1
+
+
+def get_railway_connection():
+    """
+    支援兩種設定方式：
+    1. Streamlit Secrets:
+       [mysql]
+       host = "..."
+       port = 3306
+       user = "..."
+       password = "..."
+       database = "..."
+
+    2. Railway 環境變數:
+       MYSQLHOST / MYSQLPORT / MYSQLUSER / MYSQLPASSWORD / MYSQLDATABASE
+    """
+    if mysql is None:
+        raise RuntimeError("尚未安裝 mysql-connector-python，請在 requirements.txt 加上 mysql-connector-python。")
+
+    if "mysql" in st.secrets:
+        db_cfg = st.secrets["mysql"]
+        return mysql.connector.connect(
+            host=db_cfg.get("host"),
+            port=int(db_cfg.get("port", 3306)),
+            user=db_cfg.get("user"),
+            password=db_cfg.get("password"),
+            database=db_cfg.get("database"),
+            charset="utf8mb4",
+            use_unicode=True,
+        )
+
+    return mysql.connector.connect(
+        host=os.getenv("MYSQLHOST"),
+        port=int(os.getenv("MYSQLPORT", "3306")),
+        user=os.getenv("MYSQLUSER"),
+        password=os.getenv("MYSQLPASSWORD"),
+        database=os.getenv("MYSQLDATABASE"),
+        charset="utf8mb4",
+        use_unicode=True,
+    )
+
+
+def init_redeem_storage_table(conn):
+    cursor = conn.cursor()
+
+    cursor.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {REDEEM_STORAGE_TABLE} (
+            id INT PRIMARY KEY,
+            state_json LONGTEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """
+    )
+
+    conn.commit()
+    cursor.close()
+
+
+def save_redeem_tickets_to_railway():
+    conn = get_railway_connection()
+
+    try:
+        init_redeem_storage_table(conn)
+
+        state = {
+            "redeem_tickets": st.session_state.get("redeem_tickets", [])
+        }
+
+        state_json = json.dumps(state, ensure_ascii=False)
+
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            INSERT INTO {REDEEM_STORAGE_TABLE} (id, state_json)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE
+                state_json = VALUES(state_json),
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (REDEEM_STORAGE_ID, state_json)
+        )
+
+        conn.commit()
+        cursor.close()
+
+    finally:
+        conn.close()
+
+
+def load_redeem_tickets_from_railway():
+    conn = get_railway_connection()
+
+    try:
+        init_redeem_storage_table(conn)
+
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            f"SELECT state_json, updated_at FROM {REDEEM_STORAGE_TABLE} WHERE id = %s LIMIT 1",
+            (REDEEM_STORAGE_ID,)
+        )
+
+        row = cursor.fetchone()
+        cursor.close()
+
+        if not row:
+            return None, None
+
+        state = json.loads(row["state_json"])
+        updated_at = row.get("updated_at")
+
+        return state, updated_at
+
+    finally:
+        conn.close()
+
+
+def delete_redeem_tickets_from_railway():
+    conn = get_railway_connection()
+
+    try:
+        init_redeem_storage_table(conn)
+
+        cursor = conn.cursor()
+        cursor.execute(
+            f"DELETE FROM {REDEEM_STORAGE_TABLE} WHERE id = %s",
+            (REDEEM_STORAGE_ID,)
+        )
+
+        conn.commit()
+        cursor.close()
+
+    finally:
+        conn.close()
+
+
 # ===== Session State =====
 
 if "lines" not in st.session_state:
@@ -1663,7 +1811,7 @@ with b1:
                 price_4,
                 price_car
             )
-            st.success("已計算，並自動存入兌獎區。")
+            st.success("已計算，並存入本次頁面的兌獎區。需要保留到下次開啟時，請到兌獎區按「儲存兌獎區」。")
 
 with b2:
     if st.button("清空全部", use_container_width=True):
@@ -1720,6 +1868,42 @@ if st.session_state["calculate_clicked"]:
 
 st.subheader("🎁 兌獎區")
 st.caption("每按一次『開始計算』會自動存成同一張票；車下注支數＝號碼數×倍率×38，車中獎支數＝命中號碼數×倍率×4。")
+
+with st.expander("💾 Railway 儲存 / 載入兌獎區", expanded=False):
+    st.caption("這裡只會存取兌獎區資料，不會每一步自動存，避免操作卡頓。")
+
+    save_col, load_col, delete_col = st.columns(3, gap="small")
+
+    with save_col:
+        if st.button("儲存兌獎區", use_container_width=True):
+            try:
+                save_redeem_tickets_to_railway()
+                st.success("兌獎區已儲存到 Railway。")
+            except Exception as exc:
+                st.error(f"儲存失敗：{exc}")
+
+    with load_col:
+        if st.button("載入兌獎區", use_container_width=True):
+            try:
+                state, updated_at = load_redeem_tickets_from_railway()
+
+                if state is None:
+                    st.info("Railway 目前沒有儲存的兌獎區資料。")
+                else:
+                    st.session_state["redeem_tickets"] = state.get("redeem_tickets", [])
+                    st.success(f"已載入兌獎區資料。最後儲存時間：{updated_at}")
+                    st.rerun()
+            except Exception as exc:
+                st.error(f"載入失敗：{exc}")
+
+    with delete_col:
+        if st.button("清除雲端資料", use_container_width=True):
+            try:
+                delete_redeem_tickets_from_railway()
+                st.success("Railway 上的兌獎區資料已清除。")
+            except Exception as exc:
+                st.error(f"清除失敗：{exc}")
+
 
 if len(st.session_state["redeem_tickets"]) == 0:
     st.info("目前兌獎區還沒有資料。請先按『開始計算』，系統會自動把計算內容存進來。")
