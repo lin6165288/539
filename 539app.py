@@ -1879,18 +1879,6 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                         unsafe_allow_html=True
                     )
 
-                    summary_text = (
-                        f"模式：{review['模式']}<br>"
-                        f"號碼：{html.escape(review['號碼'] or '—')}<br>"
-                        f"分區：{html.escape(review['分區'] or '—')}<br>"
-                        f"檢查：{html.escape(review['檢查'])}"
-                    )
-
-                    st.markdown(
-                        f'<div class="ai-summary">{summary_text}</div>',
-                        unsafe_allow_html=True
-                    )
-
                     m2_col, m3_col, m4_col, car_col = st.columns(4, gap="small")
 
                     with m2_col:
