@@ -1276,6 +1276,190 @@ def get_ai_line_review_dict(line, line_index=1):
     }
 
 
+def format_multiplier_value(value):
+    try:
+        value = float(value)
+    except Exception:
+        return "0"
+
+    if abs(value - round(value)) < 1e-9:
+        return str(int(round(value)))
+
+    return f"{value:g}"
+
+
+def ai_line_to_edit_defaults(line):
+    parsed = parse_line(line)
+
+    if parsed["mode"] == "分區交叉":
+        numbers_text = " | ".join(
+            " ".join(f"{num:02d}" for num in group)
+            for group in parsed["groups"]
+        )
+    else:
+        numbers_text = " ".join(f"{num:02d}" for num in parsed["numbers"])
+
+    return {
+        "mode": parsed["mode"],
+        "numbers_text": numbers_text,
+        "two": float(parsed["two_multiplier"]),
+        "three": float(parsed["three_multiplier"]),
+        "four": float(parsed["four_multiplier"]),
+        "car": float(parsed["car_multiplier"]),
+    }
+
+
+def build_ai_line_from_edit(mode, numbers_text, two, three, four, car):
+    numbers_text = (numbers_text or "").strip()
+    numbers_text = numbers_text.replace("｜", "|")
+    numbers_text = numbers_text.replace("，", " ").replace(",", " ")
+    numbers_text = re.sub(r"\s+", " ", numbers_text)
+
+    if mode == "分區交叉":
+        group_parts = [
+            part.strip()
+            for part in numbers_text.split("|")
+            if part.strip()
+        ]
+
+        normalized_groups = []
+
+        for part in group_parts:
+            nums, _, _ = parse_numbers(part)
+            if nums:
+                normalized_groups.append(" ".join(f"{num:02d}" for num in nums))
+
+        body = " | ".join(normalized_groups)
+    else:
+        nums, _, _ = parse_numbers(numbers_text)
+        body = " ".join(f"{num:02d}" for num in nums)
+
+    return (
+        f"{body} "
+        f"二x{format_multiplier_value(two)} "
+        f"三x{format_multiplier_value(three)} "
+        f"四x{format_multiplier_value(four)} "
+        f"車x{format_multiplier_value(car)}"
+    ).strip()
+
+
+def update_ai_line_by_index(line_index, new_line):
+    updated_lines = list(st.session_state["ai_draft_lines"])
+    updated_lines[line_index - 1] = normalize_combined_multipliers(new_line.strip())
+    set_ai_draft_lines(updated_lines)
+
+
+if hasattr(st, "dialog"):
+    @st.dialog("進行修改")
+    def ai_line_edit_dialog():
+        line_index = st.session_state.get("editing_ai_line_index")
+
+        if not line_index:
+            st.warning("沒有選擇要修改的行。")
+            return
+
+        if line_index < 1 or line_index > len(st.session_state.get("ai_draft_lines", [])):
+            st.warning("這一行已不存在。")
+            return
+
+        current_line = st.session_state["ai_draft_lines"][line_index - 1]
+        defaults = ai_line_to_edit_defaults(current_line)
+        version = st.session_state.get("ai_edit_dialog_version", 0)
+
+        st.caption(f"正在修改第 {line_index} 行")
+
+        mode = st.radio(
+            "模式",
+            ["一般組合", "分區交叉"],
+            index=0 if defaults["mode"] == "一般組合" else 1,
+            horizontal=True,
+            key=f"ai_edit_mode_{line_index}_{version}"
+        )
+
+        numbers_text = st.text_area(
+            "號碼 / 分區",
+            value=defaults["numbers_text"],
+            height=90,
+            key=f"ai_edit_numbers_{line_index}_{version}",
+            help="一般組合：直接輸入號碼。分區交叉：用 | 分隔各區，例如 08 | 12 24 | 03 15。"
+        )
+
+        st.caption("倍率")
+
+        c1, c2, c3, c4 = st.columns(4, gap="small")
+
+        with c1:
+            two = st.number_input(
+                "二",
+                min_value=0.0,
+                step=0.05,
+                value=defaults["two"],
+                format="%.2f",
+                key=f"ai_edit_two_{line_index}_{version}"
+            )
+
+        with c2:
+            three = st.number_input(
+                "三",
+                min_value=0.0,
+                step=0.05,
+                value=defaults["three"],
+                format="%.2f",
+                key=f"ai_edit_three_{line_index}_{version}"
+            )
+
+        with c3:
+            four = st.number_input(
+                "四",
+                min_value=0.0,
+                step=0.05,
+                value=defaults["four"],
+                format="%.2f",
+                key=f"ai_edit_four_{line_index}_{version}"
+            )
+
+        with c4:
+            car = st.number_input(
+                "車",
+                min_value=0.0,
+                step=0.05,
+                value=defaults["car"],
+                format="%.2f",
+                key=f"ai_edit_car_{line_index}_{version}"
+            )
+
+        preview_line = build_ai_line_from_edit(mode, numbers_text, two, three, four, car)
+
+        st.markdown("**修改後預覽**")
+        st.code(preview_line, language=None)
+
+        errors = validate_single_ai_line(preview_line)
+
+        if errors:
+            st.warning("；".join(errors))
+
+        save_col, cancel_col = st.columns(2, gap="small")
+
+        with save_col:
+            if st.button("儲存修改", type="primary", use_container_width=True):
+                if errors:
+                    st.error("請先修正錯誤後再儲存。")
+                else:
+                    update_ai_line_by_index(line_index, preview_line)
+                    st.session_state["editing_ai_line_index"] = None
+                    st.session_state["ai_edit_dialog_version"] = version + 1
+                    st.success(f"第 {line_index} 行已修改。")
+                    st.rerun()
+
+        with cancel_col:
+            if st.button("取消", use_container_width=True):
+                st.session_state["editing_ai_line_index"] = None
+                st.rerun()
+else:
+    def ai_line_edit_dialog():
+        st.warning("目前 Streamlit 版本不支援彈跳視窗，請更新 Streamlit。")
+
+
 
 
 # ===== Railway 兌獎區儲存 =====
@@ -1504,6 +1688,12 @@ if "ai_draft_text" not in st.session_state:
 if "ai_draft_lines" not in st.session_state:
     st.session_state["ai_draft_lines"] = []
 
+if "editing_ai_line_index" not in st.session_state:
+    st.session_state["editing_ai_line_index"] = None
+
+if "ai_edit_dialog_version" not in st.session_state:
+    st.session_state["ai_edit_dialog_version"] = 0
+
 if "ai_draft_text_area_version" not in st.session_state:
     st.session_state["ai_draft_text_area_version"] = 0
 
@@ -1616,10 +1806,14 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                 with st.container(border=True):
                     st.markdown(f"**第 {line_index} 行**")
 
-                    edited_line = st.text_input(
+                    edited_line = original_line
+
+                    st.text_input(
                         f"第 {line_index} 行內容",
+                        value=edited_line,
                         key=line_key,
-                        label_visibility="collapsed"
+                        label_visibility="collapsed",
+                        disabled=True
                     )
 
                     review = get_ai_line_review_dict(edited_line, line_index)
@@ -1634,11 +1828,9 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                     edit_col, add_col, delete_col = st.columns(3, gap="small")
 
                     with edit_col:
-                        if st.button("儲存修改", key=f"save_ai_line_{line_index}", use_container_width=True):
-                            updated_lines = list(st.session_state["ai_draft_lines"])
-                            updated_lines[line_index - 1] = normalize_combined_multipliers(edited_line.strip())
-                            set_ai_draft_lines(updated_lines)
-                            st.success(f"第 {line_index} 行已更新。")
+                        if st.button("進行修改", key=f"edit_ai_line_{line_index}", use_container_width=True):
+                            st.session_state["editing_ai_line_index"] = line_index
+                            st.session_state["ai_edit_dialog_version"] = st.session_state.get("ai_edit_dialog_version", 0) + 1
                             st.rerun()
 
                     with add_col:
@@ -1666,6 +1858,11 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                             st.rerun()
 
 
+
+
+
+if st.session_state.get("editing_ai_line_index"):
+    ai_line_edit_dialog()
 
 
 # ===== 新增一組 =====
