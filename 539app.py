@@ -676,10 +676,8 @@ def build_redeem_ticket(ticket_name, line, result_row):
 
 def get_next_redeem_ticket_name():
     """
-    兌獎區的「第幾張」是依照每次按下開始計算來編號，
-    不是依照同一次計算裡有幾行組別來編號。
-    例如：第 1 次開始計算有 1 行 => 第1張
-          第 2 次開始計算有 2 行 => 兩行都算第2張
+    預設票名：依照兌獎區已有票名自動產生第1張、第2張...
+    但使用者也可以在開始計算時自由命名票名。
     """
     existing_names = []
 
@@ -691,16 +689,15 @@ def get_next_redeem_ticket_name():
     return f"第{len(existing_names) + 1}張"
 
 
-def save_current_calculation_to_redeem(lines, price_2, price_3, price_4, price_car):
+def save_current_calculation_to_redeem(lines, price_2, price_3, price_4, price_car, ticket_name=None):
     results, _ = calculate_results(lines, price_2, price_3, price_4, price_car)
 
     # 同一次按下「開始計算」的所有組別，都歸在同一張票名底下
-    ticket_name = get_next_redeem_ticket_name()
+    ticket_name = (ticket_name or "").strip() or get_next_redeem_ticket_name()
 
     for index, line in enumerate(lines):
         ticket = build_redeem_ticket(ticket_name, line, results[index])
         st.session_state["redeem_tickets"].append(ticket)
-
 
 def parse_winning_numbers(text):
     numbers, invalid_numbers, duplicate_count = parse_numbers(text)
@@ -1289,8 +1286,16 @@ REDEEM_STORAGE_ID = 1
 
 def get_railway_connection():
     """
-    支援兩種設定方式：
-    1. Streamlit Secrets:
+    支援三種設定方式：
+
+    1. Streamlit Secrets 扁平格式：
+       MYSQLHOST = "..."
+       MYSQLPORT = "3306"
+       MYSQLUSER = "..."
+       MYSQLPASSWORD = "..."
+       MYSQLDATABASE = "..."
+
+    2. Streamlit Secrets 區塊格式：
        [mysql]
        host = "..."
        port = 3306
@@ -1298,34 +1303,65 @@ def get_railway_connection():
        password = "..."
        database = "..."
 
-    2. Railway 環境變數:
+    3. Railway 環境變數：
        MYSQLHOST / MYSQLPORT / MYSQLUSER / MYSQLPASSWORD / MYSQLDATABASE
     """
     if mysql is None:
         raise RuntimeError("尚未安裝 mysql-connector-python，請在 requirements.txt 加上 mysql-connector-python。")
 
-    if "mysql" in st.secrets:
+    # 方式 1：Streamlit Secrets 扁平格式
+    if "MYSQLHOST" in st.secrets:
+        cfg = {
+            "host": st.secrets.get("MYSQLHOST"),
+            "port": st.secrets.get("MYSQLPORT", 3306),
+            "user": st.secrets.get("MYSQLUSER"),
+            "password": st.secrets.get("MYSQLPASSWORD"),
+            "database": st.secrets.get("MYSQLDATABASE"),
+        }
+
+    # 方式 2：Streamlit Secrets 區塊格式
+    elif "mysql" in st.secrets:
         db_cfg = st.secrets["mysql"]
-        return mysql.connector.connect(
-            host=db_cfg.get("host"),
-            port=int(db_cfg.get("port", 3306)),
-            user=db_cfg.get("user"),
-            password=db_cfg.get("password"),
-            database=db_cfg.get("database"),
-            charset="utf8mb4",
-            use_unicode=True,
+        cfg = {
+            "host": db_cfg.get("host"),
+            "port": db_cfg.get("port", 3306),
+            "user": db_cfg.get("user"),
+            "password": db_cfg.get("password"),
+            "database": db_cfg.get("database"),
+        }
+
+    # 方式 3：環境變數
+    else:
+        cfg = {
+            "host": os.getenv("MYSQLHOST"),
+            "port": os.getenv("MYSQLPORT", "3306"),
+            "user": os.getenv("MYSQLUSER"),
+            "password": os.getenv("MYSQLPASSWORD"),
+            "database": os.getenv("MYSQLDATABASE"),
+        }
+
+    missing = [
+        key for key in ["host", "user", "password", "database"]
+        if not cfg.get(key)
+    ]
+
+    if missing:
+        raise RuntimeError(
+            "資料庫連線資訊不完整，缺少："
+            + "、".join(missing)
+            + "。請到 Streamlit Secrets 加上 MYSQLHOST、MYSQLPORT、MYSQLUSER、MYSQLPASSWORD、MYSQLDATABASE。"
         )
 
     return mysql.connector.connect(
-        host=os.getenv("MYSQLHOST"),
-        port=int(os.getenv("MYSQLPORT", "3306")),
-        user=os.getenv("MYSQLUSER"),
-        password=os.getenv("MYSQLPASSWORD"),
-        database=os.getenv("MYSQLDATABASE"),
+        host=cfg["host"],
+        port=int(cfg.get("port", 3306)),
+        user=cfg["user"],
+        password=cfg["password"],
+        database=cfg["database"],
         charset="utf8mb4",
         use_unicode=True,
+        connection_timeout=10,
     )
-
 
 def init_redeem_storage_table(conn):
     cursor = conn.cursor()
@@ -1453,6 +1489,12 @@ if "need_reset_multipliers" not in st.session_state:
 if "redeem_tickets" not in st.session_state:
     st.session_state["redeem_tickets"] = []
 
+if "pending_calculate_confirm" not in st.session_state:
+    st.session_state["pending_calculate_confirm"] = False
+
+if "ticket_name_input" not in st.session_state:
+    st.session_state["ticket_name_input"] = ""
+
 if "ai_draft_text" not in st.session_state:
     st.session_state["ai_draft_text"] = ""
 
@@ -1529,33 +1571,34 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
             except Exception as exc:
                 st.error(str(exc))
 
-        st.caption("下面這個草稿框可以直接手動編輯、修正。你也可以把草稿拆成一行一行確認，OK 的就加入組別，不 OK 的就修改或刪除。")
-        ai_text_area_key = f"ai_draft_text_editor_{st.session_state.get('ai_draft_text_area_version', 0)}"
+        with st.expander("進階：整份 AI 草稿文字", expanded=False):
+            st.caption("通常不需要看這一區；若要大量修改整份草稿，才打開這裡。")
+            ai_text_area_key = f"ai_draft_text_editor_{st.session_state.get('ai_draft_text_area_version', 0)}"
 
-        ai_draft_text = st.text_area(
-            "AI辨識草稿（可直接編輯）",
-            key=ai_text_area_key,
-            value=st.session_state.get("ai_draft_text", ""),
-            height=260,
-            placeholder="AI辨識結果會出現在這裡，你可以直接修改內容後再加入。"
-        )
+            ai_draft_text = st.text_area(
+                "AI辨識草稿（可直接編輯）",
+                key=ai_text_area_key,
+                value=st.session_state.get("ai_draft_text", ""),
+                height=220,
+                placeholder="AI辨識結果會出現在這裡，你可以直接修改內容後再更新逐行清單。"
+            )
 
-        # 保險：如果 AI 或手動貼上的內容含有字面上的 \n，轉成真正換行
-        ai_draft_text = ai_draft_text.replace("\\n", "\n")
-        st.session_state["ai_draft_text"] = ai_draft_text
+            # 保險：如果 AI 或手動貼上的內容含有字面上的 \n，轉成真正換行
+            ai_draft_text = ai_draft_text.replace("\\n", "\n")
+            st.session_state["ai_draft_text"] = ai_draft_text
 
-        sync_ai_col, clear_ai_col = st.columns(2, gap="small")
+            sync_ai_col, clear_ai_col = st.columns(2, gap="small")
 
-        with sync_ai_col:
-            if st.button("依草稿文字更新逐行清單", use_container_width=True):
-                set_ai_draft_lines(split_ai_draft_lines(st.session_state["ai_draft_text"]))
-                st.success("已根據草稿文字更新逐行清單。")
-                st.rerun()
+            with sync_ai_col:
+                if st.button("依草稿文字更新逐行清單", use_container_width=True):
+                    set_ai_draft_lines(split_ai_draft_lines(st.session_state["ai_draft_text"]))
+                    st.success("已根據草稿文字更新逐行清單。")
+                    st.rerun()
 
-        with clear_ai_col:
-            if st.button("清空AI草稿", use_container_width=True):
-                set_ai_draft_lines([])
-                st.rerun()
+            with clear_ai_col:
+                if st.button("清空AI草稿", use_container_width=True):
+                    set_ai_draft_lines([])
+                    st.rerun()
 
         if st.session_state["ai_draft_lines"]:
             st.markdown("#### 逐行確認")
@@ -1619,14 +1662,6 @@ with st.expander("🤖 AI辨識圖片文字", expanded=False):
                             st.success(f"第 {line_index} 行已刪除。")
                             st.rerun()
 
-        if st.session_state["ai_draft_text"].strip():
-            st.markdown("#### AI草稿核對表")
-            st.caption("這是整份草稿的總覽；真正操作請用上面的逐行確認。")
-            st.dataframe(
-                ai_draft_review_rows(st.session_state["ai_draft_text"]),
-                use_container_width=True,
-                hide_index=True
-            )
 
 
 
@@ -1799,19 +1834,14 @@ with b1:
 
         if manual_errors:
             st.session_state["calculate_clicked"] = False
+            st.session_state["pending_calculate_confirm"] = False
             st.error("請先修正以下問題：")
             for error in manual_errors:
                 st.write(error)
         else:
-            st.session_state["calculate_clicked"] = True
-            save_current_calculation_to_redeem(
-                st.session_state["lines"],
-                price_2,
-                price_3,
-                price_4,
-                price_car
-            )
-            st.success("已計算，並存入本次頁面的兌獎區。需要保留到下次開啟時，請到兌獎區按「儲存兌獎區」。")
+            st.session_state["pending_calculate_confirm"] = True
+            st.session_state["ticket_name_input"] = st.session_state.get("ticket_name_input", "") or get_next_redeem_ticket_name()
+            st.rerun()
 
 with b2:
     if st.button("清空全部", use_container_width=True):
@@ -1821,6 +1851,43 @@ with b2:
         reset_all_multipliers()
         st.session_state["select_warning"] = ""
         st.rerun()
+
+
+# ===== 開始計算前：命名票名 =====
+
+if st.session_state.get("pending_calculate_confirm", False):
+    st.markdown("### 🧾 命名這張票")
+    st.info("請輸入這次計算要儲存到兌獎區的票名。若不修改，會使用預設票名。")
+
+    with st.container(border=True):
+        st.text_input(
+            "票名",
+            key="ticket_name_input",
+            placeholder="例如：A1、第一張、6/20-1"
+        )
+
+        confirm_col, cancel_col = st.columns(2, gap="small")
+
+        with confirm_col:
+            if st.button("確認計算並存入兌獎區", type="primary", use_container_width=True):
+                st.session_state["calculate_clicked"] = True
+                save_current_calculation_to_redeem(
+                    st.session_state["lines"],
+                    price_2,
+                    price_3,
+                    price_4,
+                    price_car,
+                    ticket_name=st.session_state.get("ticket_name_input", "")
+                )
+                st.session_state["pending_calculate_confirm"] = False
+                st.session_state["ticket_name_input"] = ""
+                st.success("已計算，並存入本次頁面的兌獎區。需要保留到下次開啟時，請到兌獎區按「儲存兌獎區」。")
+                st.rerun()
+
+        with cancel_col:
+            if st.button("取消", use_container_width=True):
+                st.session_state["pending_calculate_confirm"] = False
+                st.rerun()
 
 
 # ===== 計算結果 =====
