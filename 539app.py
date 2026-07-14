@@ -9,6 +9,7 @@ import json
 import os
 import html
 from datetime import datetime, timezone, timedelta
+import textwrap
 
 try:
     import mysql.connector
@@ -166,7 +167,7 @@ st.markdown(
 
     .settlement-table {
         width: 100%;
-        min-width: 560px;
+        min-width: 0;
         border-collapse: collapse;
         table-layout: fixed;
         background: white;
@@ -986,54 +987,58 @@ def build_settlement_table_html():
         four_count = format_settlement_number(row.get("四星總支數", 0))
 
         body_rows.append(
-            f"""
-            <tr>
-                <td>{ticket_name}</td>
-                <td>{two_count}</td>
-                <td>{three_count}</td>
-                <td>{four_count}</td>
-                <td></td>
-            </tr>
-            """
+            textwrap.dedent(
+                f"""
+                <tr>
+                    <td>{ticket_name}</td>
+                    <td>{two_count}</td>
+                    <td>{three_count}</td>
+                    <td>{four_count}</td>
+                    <td></td>
+                </tr>
+                """
+            ).strip()
         )
 
-    table_html = f"""
-    <div class="settlement-wrap">
-        <table class="settlement-table">
-            <thead>
-                <tr>
-                    <th class="ticket-col">單號</th>
-                    <th class="number-col">二（支）</th>
-                    <th class="number-col">三（支）</th>
-                    <th class="number-col">四（支）</th>
-                    <th class="note-col">備註</th>
-                </tr>
-            </thead>
-            <tbody>
-                {''.join(body_rows)}
-                <tr>
-                    <td class="total-label">總計：</td>
-                    <td>{format_settlement_number(total_two)}</td>
-                    <td>{format_settlement_number(total_three)}</td>
-                    <td>{format_settlement_number(total_four)}</td>
-                    <td></td>
-                </tr>
-                <tr class="amount-row">
-                    <td></td>
-                    <td>{format_settlement_number(amount_two)}</td>
-                    <td>{format_settlement_number(amount_three)}</td>
-                    <td>{format_settlement_number(amount_four)}</td>
-                    <td></td>
-                </tr>
-                <tr>
-                    <td class="footer-date">{date_text}</td>
-                    <td colspan="3" class="footer-total">共付{format_settlement_number(grand_total)}</td>
-                    <td></td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-    """
+    table_html = textwrap.dedent(
+        f"""
+        <div class="settlement-wrap">
+            <table class="settlement-table">
+                <thead>
+                    <tr>
+                        <th class="ticket-col">單號</th>
+                        <th class="number-col">二（支）</th>
+                        <th class="number-col">三（支）</th>
+                        <th class="number-col">四（支）</th>
+                        <th class="note-col">備註</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(body_rows)}
+                    <tr>
+                        <td class="total-label">總計：</td>
+                        <td>{format_settlement_number(total_two)}</td>
+                        <td>{format_settlement_number(total_three)}</td>
+                        <td>{format_settlement_number(total_four)}</td>
+                        <td></td>
+                    </tr>
+                    <tr class="amount-row">
+                        <td></td>
+                        <td>{format_settlement_number(amount_two)}</td>
+                        <td>{format_settlement_number(amount_three)}</td>
+                        <td>{format_settlement_number(amount_four)}</td>
+                        <td></td>
+                    </tr>
+                    <tr>
+                        <td class="footer-date">{date_text}</td>
+                        <td colspan="3" class="footer-total">共付{format_settlement_number(grand_total)}</td>
+                        <td></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        """
+    ).strip()
 
     return table_html
 
