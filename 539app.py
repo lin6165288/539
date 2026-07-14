@@ -8,6 +8,7 @@ import time
 import json
 import os
 import html
+from datetime import datetime, timezone, timedelta
 
 try:
     import mysql.connector
@@ -153,6 +154,88 @@ st.markdown(
         background: #f8fafc;
         border: 1px solid #e2e8f0;
         color: #64748b;
+    }
+
+    .settlement-wrap {
+        width: 100%;
+        background: white;
+        padding: 4px;
+        margin-top: 8px;
+        overflow-x: auto;
+    }
+
+    .settlement-table {
+        width: 100%;
+        min-width: 560px;
+        border-collapse: collapse;
+        table-layout: fixed;
+        background: white;
+        color: #111827;
+        font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    }
+
+    .settlement-table th,
+    .settlement-table td {
+        border: 2px solid #555;
+        padding: 7px 5px;
+        text-align: center;
+        vertical-align: middle;
+        font-size: 1rem;
+        line-height: 1.2;
+    }
+
+    .settlement-table th {
+        font-size: 1.08rem;
+        font-weight: 800;
+        background: #fff;
+    }
+
+    .settlement-table .ticket-col {
+        width: 24%;
+    }
+
+    .settlement-table .number-col {
+        width: 19%;
+    }
+
+    .settlement-table .note-col {
+        width: 19%;
+    }
+
+    .settlement-table .total-label {
+        font-weight: 800;
+        font-size: 1.05rem;
+    }
+
+    .settlement-table .amount-row td {
+        font-weight: 700;
+        font-size: 1rem;
+    }
+
+    .settlement-table .footer-date {
+        font-weight: 800;
+        font-size: 1rem;
+    }
+
+    .settlement-table .footer-total {
+        font-weight: 900;
+        font-size: 1.2rem;
+    }
+
+    @media (max-width: 390px) {
+        .settlement-table th,
+        .settlement-table td {
+            padding: 6px 3px;
+            font-size: 0.82rem;
+        }
+
+        .settlement-table th {
+            font-size: 0.9rem;
+        }
+
+        .settlement-table .footer-total {
+            font-size: 1rem;
+        }
     }
 
     .sticky-photo {
@@ -856,6 +939,103 @@ def redeem_ticket_detail_rows():
         })
 
     return rows
+
+
+def format_settlement_number(value):
+    try:
+        value = float(value)
+    except Exception:
+        return str(value)
+
+    if abs(value - round(value)) < 1e-9:
+        return str(int(round(value)))
+
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def build_settlement_table_html():
+    """
+    依兌獎區中每一張票的二、三、四星總支數，產生方便截圖的結算表。
+    固定單價：
+    二星 72.5 元、三星 63.5 元、四星 53 元。
+    """
+    summary_rows = redeem_ticket_summary_rows()
+
+    price_two = 72.5
+    price_three = 63.5
+    price_four = 53.0
+
+    total_two = sum(float(row.get("二星總支數", 0)) for row in summary_rows)
+    total_three = sum(float(row.get("三星總支數", 0)) for row in summary_rows)
+    total_four = sum(float(row.get("四星總支數", 0)) for row in summary_rows)
+
+    amount_two = total_two * price_two
+    amount_three = total_three * price_three
+    amount_four = total_four * price_four
+    grand_total = amount_two + amount_three + amount_four
+
+    taiwan_now = datetime.now(timezone(timedelta(hours=8)))
+    date_text = f"{taiwan_now.year}/{taiwan_now.month}/{taiwan_now.day}"
+
+    body_rows = []
+
+    for row in summary_rows:
+        ticket_name = html.escape(str(row.get("票名", "")))
+        two_count = format_settlement_number(row.get("二星總支數", 0))
+        three_count = format_settlement_number(row.get("三星總支數", 0))
+        four_count = format_settlement_number(row.get("四星總支數", 0))
+
+        body_rows.append(
+            f"""
+            <tr>
+                <td>{ticket_name}</td>
+                <td>{two_count}</td>
+                <td>{three_count}</td>
+                <td>{four_count}</td>
+                <td></td>
+            </tr>
+            """
+        )
+
+    table_html = f"""
+    <div class="settlement-wrap">
+        <table class="settlement-table">
+            <thead>
+                <tr>
+                    <th class="ticket-col">單號</th>
+                    <th class="number-col">二（支）</th>
+                    <th class="number-col">三（支）</th>
+                    <th class="number-col">四（支）</th>
+                    <th class="note-col">備註</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(body_rows)}
+                <tr>
+                    <td class="total-label">總計：</td>
+                    <td>{format_settlement_number(total_two)}</td>
+                    <td>{format_settlement_number(total_three)}</td>
+                    <td>{format_settlement_number(total_four)}</td>
+                    <td></td>
+                </tr>
+                <tr class="amount-row">
+                    <td></td>
+                    <td>{format_settlement_number(amount_two)}</td>
+                    <td>{format_settlement_number(amount_three)}</td>
+                    <td>{format_settlement_number(amount_four)}</td>
+                    <td></td>
+                </tr>
+                <tr>
+                    <td class="footer-date">{date_text}</td>
+                    <td colspan="3" class="footer-total">共付{format_settlement_number(grand_total)}</td>
+                    <td></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    """
+
+    return table_html
 
 
 def redeem_result_summary_by_ticket(winning_numbers):
@@ -1737,6 +1917,9 @@ if "need_reset_multipliers" not in st.session_state:
 if "redeem_tickets" not in st.session_state:
     st.session_state["redeem_tickets"] = []
 
+if "show_settlement_table" not in st.session_state:
+    st.session_state["show_settlement_table"] = False
+
 if "pending_calculate_confirm" not in st.session_state:
     st.session_state["pending_calculate_confirm"] = False
 
@@ -2263,6 +2446,21 @@ if len(st.session_state["redeem_tickets"]) == 0:
 else:
     st.markdown("#### 已儲存票券總表")
     st.dataframe(redeem_ticket_summary_rows(), use_container_width=True, hide_index=True)
+
+    settlement_col, hide_settlement_col = st.columns(2, gap="small")
+
+    with settlement_col:
+        if st.button("生成結算表", type="primary", use_container_width=True):
+            st.session_state["show_settlement_table"] = True
+
+    with hide_settlement_col:
+        if st.button("隱藏結算表", use_container_width=True):
+            st.session_state["show_settlement_table"] = False
+
+    if st.session_state.get("show_settlement_table", False):
+        st.markdown("#### 📸 結算表")
+        st.caption("固定單價：二星 72.5 元／支、三星 63.5 元／支、四星 53 元／支。可直接截圖。")
+        st.markdown(build_settlement_table_html(), unsafe_allow_html=True)
 
     with st.expander("查看每一組明細", expanded=False):
         st.dataframe(redeem_ticket_detail_rows(), use_container_width=True, hide_index=True)
